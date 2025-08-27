@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Tuple, Optional
-import gym
+import gymnasium as gym
 import numpy as np
 
 
@@ -29,27 +29,33 @@ class BaseEdgeEnv(gym.Env, ABC):
         self.action_space = None
         
     @abstractmethod
-    def reset(self) -> np.ndarray:
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[np.ndarray, dict]:
         """Reset the environment to initial state.
         
+        Args:
+            seed: Random seed for reproducibility
+            options: Optional env-specific options
+        
         Returns:
-            Initial observation
+            Tuple of (initial observation, info)
         """
+        super().reset(seed=seed)
         self.current_step = 0
         
     @abstractmethod
-    def step(self, action: Any) -> Tuple[np.ndarray, float, bool, Dict]:
+    def step(self, action: Any) -> Tuple[np.ndarray, float, bool, bool, Dict]:
         """Execute one environment step.
         
         Args:
             action: Action to take
             
         Returns:
-            Tuple of (observation, reward, done, info)
+            Tuple of (observation, reward, terminated, truncated, info)
         """
         self.current_step += 1
-        done = self.current_step >= self.max_steps
-        return None, 0.0, done, {}
+        terminated = False
+        truncated = self.current_step >= self.max_steps
+        return None, 0.0, terminated, truncated, {}
     
     @abstractmethod
     def get_state(self) -> np.ndarray:

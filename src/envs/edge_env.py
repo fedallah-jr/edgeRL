@@ -1,8 +1,8 @@
 """EdgeSimPy environment wrapper for reinforcement learning."""
 
 import numpy as np
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 from typing import Dict, Any, Tuple, List, Optional
 from edge_sim_py import *
 from .base_env import BaseEdgeEnv
@@ -124,9 +124,9 @@ class EdgeEnv(BaseEdgeEnv):
         # Reset service index for new round
         self.current_service_idx = 0
         
-    def reset(self) -> np.ndarray:
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[np.ndarray, Dict]:
         """Reset environment to initial state."""
-        super().reset()
+        super().reset(seed=seed)
         
         # Reset simulator
         self._init_simulator()
@@ -136,17 +136,19 @@ class EdgeEnv(BaseEdgeEnv):
         self.services_to_migrate = []
         self.last_state = None
         
-        # Get initial observation
-        return self.get_state()
+        # Get initial observation and info
+        obs = self.get_state()
+        info = self.get_info()
+        return obs, info
     
-    def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict]:
+    def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, Dict]:
         """Execute one environment step.
         
         Args:
             action: Server index to migrate current service to
             
         Returns:
-            Tuple of (observation, reward, done, info)
+            Tuple of (observation, reward, terminated, truncated, info)
         """
         info = {}
         
@@ -190,13 +192,14 @@ class EdgeEnv(BaseEdgeEnv):
             state_before, action, state_after, info
         )
         
-        # Check if episode is done
-        done = self.current_step >= self.max_steps
+        # Episode termination/truncation
+        terminated = False
+        truncated = self.current_step >= self.max_steps
         
         # Store current state
         self.last_state = state_after
         
-        return state_after, reward, done, info
+        return state_after, reward, terminated, truncated, info
     
     def get_state(self) -> np.ndarray:
         """Get current environment state.

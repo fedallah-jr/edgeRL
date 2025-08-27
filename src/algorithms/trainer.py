@@ -2,11 +2,10 @@
 
 import os
 from typing import Dict, Any, Optional
+import numpy as np
 import ray
-from ray import tune
-from ray.rllib.agents import dqn
-from ray.rllib.agents.callbacks import DefaultCallbacks
-from ray.tune.logger import pretty_print
+from ray.rllib.algorithms.dqn import DQNConfig
+from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
 
 class EdgeSimCallbacks(DefaultCallbacks):
@@ -60,84 +59,71 @@ class RLTrainer:
         """Setup DQN algorithm.
         
         Returns:
-            Configured DQN trainer
+            Configured DQN algorithm instance
         """
         # Get DQN-specific configuration
-        dqn_config = self.config['algorithm']['hyperparameters']
+        dqn_cfg_dict = self.config['algorithm']['hyperparameters']
         
-        # Create RLlib configuration
-        config = dqn.DEFAULT_CONFIG.copy()
+        # Import env here and pass a creator to RLlib to avoid registration timing issues
+        from ..envs.edge_env import EdgeEnv
+
+        # Build RLlib DQN config using the modern API
+        cfg = (
+            DQNConfig()
+            .environment(env=EdgeEnv, env_config=self.env_config)
+            .framework("torch")
+            .resources(
+                num_gpus=self.resource_config.get('num_gpus', 0),
+            )
+            .env_runners(
+                num_env_runners=self.resource_config.get('num_workers', 2),
+                num_cpus_per_env_runner=self.resource_config.get('num_cpus_per_worker', 1),
+            )
+            .training(
+                lr=dqn_cfg_dict.get('lr', 1e-4),
+                gamma=dqn_cfg_dict.get('gamma', 0.99),
+                double_q=dqn_cfg_dict.get('double_q', True),
+                dueling=dqn_cfg_dict.get('dueling', True),
+                n_step=dqn_cfg_dict.get('n_step', 1),
+                train_batch_size=dqn_cfg_dict.get('train_batch_size', 32),
+                target_network_update_freq=dqn_cfg_dict.get('target_network_update_freq', 500),
+                adam_epsilon=dqn_cfg_dict.get('adam_epsilon', 1e-8),
+                grad_clip=dqn_cfg_dict.get('grad_clip', 40),
+            )
+            .rl_module(
+                model_config=dqn_cfg_dict.get('model', {
+                    "fcnet_hiddens": [256, 256],
+                    "fcnet_activation": "relu",
+                })
+            )
+            .callbacks(callbacks_class=EdgeSimCallbacks)
+            .debugging(seed=self.training_config.get('seed', 42))
+        )
         
-        # Update with our configuration
-        config.update({
-            # Environment
-            "env": "EdgeEnv",
-            "env_config": self.env_config,
-            
-            # Resources
-            "num_workers": self.resource_config.get('num_workers', 2),
-            "num_gpus": self.resource_config.get('num_gpus', 0),
-            "num_cpus_per_worker": self.resource_config.get('num_cpus_per_worker', 1),
-            
-            # DQN specific
-            "lr": dqn_config.get('lr', 0.0001),
-            "gamma": dqn_config.get('gamma', 0.99),
-            "double_q": dqn_config.get('double_q', True),
-            "dueling": dqn_config.get('dueling', True),
-            "noisy": dqn_config.get('noisy', False),
-            "n_step": dqn_config.get('n_step', 1),
-            
-            # Exploration
-            "exploration_config": dqn_config.get('exploration_config', {
-                "type": "EpsilonGreedy",
-                "initial_epsilon": 1.0,
-                "final_epsilon": 0.01,
-                "epsilon_timesteps": 10000,
-            }),
-            
-            # Network
-            "model": dqn_config.get('model', {
-                "fcnet_hiddens": [256, 256],
-                "fcnet_activation": "relu",
-            }),
-            
-            # Replay buffer
-            "buffer_size": dqn_config.get('replay_buffer_config', {}).get('capacity', 50000),
-            "prioritized_replay": True,
-            "prioritized_replay_alpha": dqn_config.get('replay_buffer_config', {}).get('prioritized_replay_alpha', 0.6),
-            "prioritized_replay_beta": dqn_config.get('replay_buffer_config', {}).get('prioritized_replay_beta', 0.4),
-            "prioritized_replay_eps": dqn_config.get('replay_buffer_config', {}).get('prioritized_replay_eps', 1e-6),
-            
-            # Training
-            "train_batch_size": dqn_config.get('train_batch_size', 32),
-            "target_network_update_freq": dqn_config.get('target_network_update_freq', 500),
-            "training_intensity": dqn_config.get('training_intensity', 1),
-            
-            # Optimization
-            "adam_epsilon": dqn_config.get('adam_epsilon', 1e-8),
-            "grad_clip": dqn_config.get('grad_clip', 40),
-            
-            # Callbacks
-            "callbacks": EdgeSimCallbacks,
-            
-            # Framework
-            "framework": "torch",
-            
-            # Seed for reproducibility
-            "seed": self.training_config.get('seed', 42),
-        })
+        # Set random seed for reproducibility (added above via .debugging())
         
-        # Create trainer
-        return dqn.DQNTrainer(config=config)
+        # Do not set exploration_config when RLModule (new API stack) is enabled.
+        # RLlib's new API expects exploration to be handled inside the RLModule. If
+        # you need custom exploration, implement forward_exploration in a custom module.
+        
+        # Replay buffer capacity (optional). If provided, map to new-style config.
+        rb = dqn_cfg_dict.get('replay_buffer_config', {})
+        if rb:
+            # Prefer new-style replay buffer configuration if available in this RLlib version.
+            # Will be ignored if unsupported.
+            cfg = cfg.training(replay_buffer_config={
+                "type": "PrioritizedReplayBuffer",
+                "capacity": rb.get('capacity', 50000),
+                "alpha": rb.get('prioritized_replay_alpha', 0.6),
+                "beta": rb.get('prioritized_replay_beta', 0.4),
+                "eps": rb.get('prioritized_replay_eps', 1e-6),
+            })
+        
+        # Build the Algorithm instance
+        return cfg.build_algo()
     
     def train(self):
         """Run training loop."""
-        # Register environment
-        from ray.tune.registry import register_env
-        from ..envs.edge_env import EdgeEnv
-        
-        register_env("EdgeEnv", lambda config: EdgeEnv(config))
-        
         # Setup directories
         checkpoint_dir = self.training_config.get('checkpoint_dir', 'checkpoints/')
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -155,9 +141,17 @@ class RLTrainer:
             # Train one iteration
             result = self.trainer.train()
             
-            # Extract metrics
-            episode_reward = result.get("episode_reward_mean", 0)
-            episode_len = result.get("episode_len_mean", 0)
+            # Extract metrics (support both legacy and newer keys)
+            episode_reward = (
+                result.get("episode_reward_mean")
+                or result.get("episode_return_mean")
+                or 0
+            )
+            episode_len = (
+                result.get("episode_len_mean")
+                or result.get("episode_length_mean")
+                or 0
+            )
             
             # Custom metrics
             custom_metrics = result.get("custom_metrics", {})
@@ -212,7 +206,11 @@ class RLTrainer:
         results = []
         for episode in range(num_episodes):
             result = self.trainer.evaluate()
-            episode_reward = result.get("evaluation", {}).get("episode_reward_mean", 0)
+            episode_reward = (
+                result.get("evaluation", {}).get("episode_reward_mean")
+                or result.get("evaluation", {}).get("episode_return_mean")
+                or 0
+            )
             results.append(episode_reward)
             print(f"  Episode {episode + 1}: Reward = {episode_reward:.2f}")
         
