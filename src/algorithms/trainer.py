@@ -90,8 +90,8 @@ class RLTrainer:
         # Resources configuration
         cfg = cfg.resources(
             num_gpus=self.resource_config.get('num_gpus', 0),
-            num_cpus_for_driver=1,
-            num_cpus_per_worker=1  # Set CPU per worker
+            num_cpus_per_learner_worker=1,
+            num_learner_workers=0  # 0 means local learner
         )
         
         # Rollout workers configuration
