@@ -98,25 +98,12 @@ class RLTrainer:
             num_cpus_per_learner=1
         )
         
-        # Exploration configuration for new API
-        exploration_config = dqn_cfg_dict.get('exploration_config', {})
-        initial_epsilon = exploration_config.get('initial_epsilon', 1.0)
-        final_epsilon = exploration_config.get('final_epsilon', 0.01)
-        epsilon_timesteps = exploration_config.get('epsilon_timesteps', 10000)
-        
         # Environment runners configuration (replaces rollouts)
         cfg = cfg.env_runners(
             num_env_runners=self.resource_config.get('num_workers', 1),
             num_envs_per_env_runner=1,
             rollout_fragment_length=32,
-            batch_mode="truncate_episodes",
-            explore=True,
-            exploration_config={
-                "type": "EpsilonGreedy",
-                "initial_epsilon": initial_epsilon,
-                "final_epsilon": final_epsilon,
-                "epsilon_timesteps": epsilon_timesteps,
-            }
+            batch_mode="truncate_episodes"
         )
         
         # Training configuration
@@ -128,14 +115,6 @@ class RLTrainer:
             n_step=dqn_cfg_dict.get('n_step', 1),
             train_batch_size=dqn_cfg_dict.get('train_batch_size', 32),
             target_network_update_freq=dqn_cfg_dict.get('target_network_update_freq', 500),
-            replay_buffer_config={
-                "type": "MultiAgentPrioritizedReplayBuffer",
-                "capacity": dqn_cfg_dict.get('replay_buffer_config', {}).get('capacity', 50000),
-                "prioritized_replay": True,
-                "prioritized_replay_alpha": dqn_cfg_dict.get('replay_buffer_config', {}).get('prioritized_replay_alpha', 0.6),
-                "prioritized_replay_beta": dqn_cfg_dict.get('replay_buffer_config', {}).get('prioritized_replay_beta', 0.4),
-                "prioritized_replay_eps": dqn_cfg_dict.get('replay_buffer_config', {}).get('prioritized_replay_eps', 1e-6),
-            },
             adam_epsilon=float(dqn_cfg_dict.get('adam_epsilon', 1e-8)),
             grad_clip=dqn_cfg_dict.get('grad_clip', 40)
         )
@@ -163,7 +142,7 @@ class RLTrainer:
         
         # Build the Algorithm instance
         try:
-            algo = cfg.build()
+            algo = cfg.build_algo()
             return algo
         except Exception as e:
             print(f"Error building algorithm: {e}")
@@ -180,16 +159,12 @@ class RLTrainer:
                 .training(
                     lr=1e-4,
                     gamma=0.99,
-                    train_batch_size=32,
-                    replay_buffer_config={
-                        "type": "MultiAgentReplayBuffer",
-                        "capacity": 50000,
-                    }
+                    train_batch_size=32
                 )
                 .debugging(seed=42)
             )
             
-            return cfg.build()
+            return cfg.build_algo()
     
     def train(self):
         """Run training loop."""
