@@ -89,15 +89,19 @@ class RLTrainer:
         
         # Resources configuration
         cfg = cfg.resources(
-            num_gpus=self.resource_config.get('num_gpus', 0),
-            num_cpus_per_learner_worker=1,
-            num_learner_workers=0  # 0 means local learner
+            num_gpus=self.resource_config.get('num_gpus', 0)
         )
         
-        # Rollout workers configuration
-        cfg = cfg.rollouts(
-            num_rollout_workers=self.resource_config.get('num_workers', 1),
-            num_envs_per_worker=1,
+        # Learners configuration (replaces part of resources)
+        cfg = cfg.learners(
+            num_learners=0,  # 0 means local learner
+            num_cpus_per_learner=1
+        )
+        
+        # Environment runners configuration (replaces rollouts)
+        cfg = cfg.env_runners(
+            num_env_runners=self.resource_config.get('num_workers', 1),
+            num_envs_per_env_runner=1,
             rollout_fragment_length=32,
             batch_mode="truncate_episodes"
         )
@@ -174,7 +178,8 @@ class RLTrainer:
                 .environment(env=EdgeEnv, env_config=self.env_config, disable_env_checking=True)
                 .framework("torch")
                 .resources(num_gpus=0)
-                .rollouts(num_rollout_workers=1)
+                .learners(num_learners=0)
+                .env_runners(num_env_runners=1)
                 .training(
                     lr=1e-4,
                     gamma=0.99,
