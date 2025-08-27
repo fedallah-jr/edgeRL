@@ -49,6 +49,10 @@ class PowerReward:
         # Calculate current total power consumption
         current_power = self._calculate_total_power()
         
+        # Debug: print power consumption
+        if self.config.get('debug', False):
+            print(f"Current power: {current_power}, Previous: {self.previous_power}")
+        
         # Base reward: negative power consumption (minimize)
         reward = -current_power * self.weight
         
@@ -73,6 +77,11 @@ class PowerReward:
         # Add small bonus for successful migration
         if info.get('migration', False):
             reward += 0.1
+        
+        # Provide a small non-zero reward even if power is zero
+        if abs(reward) < 0.001:
+            # Give small negative reward to encourage exploration
+            reward = -0.01
         
         return float(reward)
     
