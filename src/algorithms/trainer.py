@@ -98,12 +98,25 @@ class RLTrainer:
             num_cpus_per_learner=1
         )
         
+        # Exploration configuration for new API
+        exploration_config = dqn_cfg_dict.get('exploration_config', {})
+        initial_epsilon = exploration_config.get('initial_epsilon', 1.0)
+        final_epsilon = exploration_config.get('final_epsilon', 0.01)
+        epsilon_timesteps = exploration_config.get('epsilon_timesteps', 10000)
+        
         # Environment runners configuration (replaces rollouts)
         cfg = cfg.env_runners(
             num_env_runners=self.resource_config.get('num_workers', 1),
             num_envs_per_env_runner=1,
             rollout_fragment_length=32,
-            batch_mode="truncate_episodes"
+            batch_mode="truncate_episodes",
+            explore=True,
+            exploration_config={
+                "type": "EpsilonGreedy",
+                "initial_epsilon": initial_epsilon,
+                "final_epsilon": final_epsilon,
+                "epsilon_timesteps": epsilon_timesteps,
+            }
         )
         
         # Training configuration
@@ -136,22 +149,6 @@ class RLTrainer:
                     "fcnet_hiddens": model_config.get("fcnet_hiddens", [256, 256]),
                     "fcnet_activation": model_config.get("fcnet_activation", "relu"),
                 }
-            }
-        )
-        
-        # Exploration configuration for new API
-        exploration_config = dqn_cfg_dict.get('exploration_config', {})
-        initial_epsilon = exploration_config.get('initial_epsilon', 1.0)
-        final_epsilon = exploration_config.get('final_epsilon', 0.01)
-        epsilon_timesteps = exploration_config.get('epsilon_timesteps', 10000)
-        
-        cfg = cfg.exploration(
-            explore=True,
-            exploration_config={
-                "type": "EpsilonGreedy",
-                "initial_epsilon": initial_epsilon,
-                "final_epsilon": final_epsilon,
-                "epsilon_timesteps": epsilon_timesteps,
             }
         )
         
