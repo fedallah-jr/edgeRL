@@ -328,12 +328,16 @@
                 "delays": {},
                 "delay_slas": {"1": 20},
                 "communication_paths": {},
-                "making_requests": {"1": {"1": true}}
+                "making_requests": {
+                    "1": [
+                        {"start": 1, "end": 1000}
+                    ]
+                }
             },
             "relationships": {
                 "applications": [{"class": "Application", "id": 1}],
                 "base_station": {"class": "BaseStation", "id": 1},
-                "mobility_model": "pathway"
+                "mobility_model": null
             }
         },
         {
@@ -343,12 +347,16 @@
                 "delays": {},
                 "delay_slas": {"2": 25},
                 "communication_paths": {},
-                "making_requests": {"2": {"1": true}}
+                "making_requests": {
+                    "2": [
+                        {"start": 1, "end": 1000}
+                    ]
+                }
             },
             "relationships": {
                 "applications": [{"class": "Application", "id": 2}],
                 "base_station": {"class": "BaseStation", "id": 2},
-                "mobility_model": "pathway"
+                "mobility_model": null
             }
         }
     ],

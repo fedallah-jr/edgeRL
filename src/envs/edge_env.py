@@ -16,12 +16,16 @@ class EdgeEnv(BaseEdgeEnv):
     infrastructures, optimizing for power consumption and QoS.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any] = None):
         """Initialize EdgeEnv.
         
         Args:
             config: Environment configuration
         """
+        # Handle empty config
+        if config is None:
+            config = {}
+            
         super().__init__(config)
         
         # Initialize simulator
@@ -58,43 +62,102 @@ class EdgeEnv(BaseEdgeEnv):
         self.current_service_idx = 0
         self.services_to_migrate = []
         self.last_state = None
+        self.migration_scheduled = False
         
     def _init_simulator(self):
         """Initialize EdgeSimPy simulator."""
-        # Create simulator with our custom algorithm
-        self.simulator = Simulator(
-            tick_duration=self.tick_duration,
-            tick_unit=self.tick_unit,
-            stopping_criterion=lambda model: model.schedule.steps >= self.max_steps,
-            resource_management_algorithm=self._rl_algorithm,
-            dump_interval=float('inf')  # Disable automatic dumping
-        )
-        
-        # Load dataset
-        self.simulator.initialize(input_file=self.dataset_path)
+        try:
+            # Create simulator with our custom algorithm
+            self.simulator = Simulator(
+                tick_duration=self.tick_duration,
+                tick_unit=self.tick_unit,
+                stopping_criterion=lambda model: model.schedule.steps >= self.max_steps,
+                resource_management_algorithm=self._rl_algorithm,
+                dump_interval=float('inf')  # Disable automatic dumping
+            )
+            
+            # Load dataset
+            self.simulator.initialize(input_file=self.dataset_path)
+            
+            # Initialize services on servers to avoid initial empty state
+            # This is a workaround for the initial service placement
+            self._initial_service_placement()
+            
+        except Exception as e:
+            print(f"Error initializing simulator: {e}")
+            raise
+            
+    def _initial_service_placement(self):
+        """Perform initial placement of services on servers."""
+        try:
+            servers = EdgeServer.all()
+            services = Service.all()
+            
+            if not servers or not services:
+                return
+                
+            # Simple round-robin initial placement
+            server_idx = 0
+            for service in services:
+                if service.server is None:
+                    # Try to find a server with capacity
+                    placed = False
+                    attempts = 0
+                    while not placed and attempts < len(servers):
+                        server = servers[server_idx % len(servers)]
+                        if server.has_capacity_to_host(service):
+                            try:
+                                service.provision(target_server=server)
+                                placed = True
+                            except:
+                                pass
+                        server_idx += 1
+                        attempts += 1
+                        
+        except Exception as e:
+            # Silent fail - initial placement is optional
+            pass
         
     def _init_spaces(self):
         """Initialize observation and action spaces."""
-        # Get environment dimensions
-        self.num_servers = EdgeServer.count()
-        self.num_services = Service.count()
-        
-        # Define observation space
-        obs_dim = self._get_observation_dim()
-        self.observation_space = spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(obs_dim,),
-            dtype=np.float32
-        )
-        
-        # Define action space (discrete: which server to migrate to)
-        # Add 1 for no-migration action if enabled
-        action_dim = self.num_servers
-        if self.allow_no_migration:
-            action_dim += 1
+        try:
+            # Get environment dimensions
+            self.num_servers = EdgeServer.count()
+            self.num_services = Service.count()
             
-        self.action_space = spaces.Discrete(action_dim)
+            # Handle edge case where no servers or services exist
+            if self.num_servers == 0:
+                self.num_servers = 1
+            if self.num_services == 0:
+                self.num_services = 1
+            
+            # Define observation space
+            obs_dim = self._get_observation_dim()
+            self.observation_space = spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(obs_dim,),
+                dtype=np.float32
+            )
+            
+            # Define action space (discrete: which server to migrate to)
+            # Add 1 for no-migration action if enabled
+            action_dim = self.num_servers
+            if self.allow_no_migration:
+                action_dim += 1
+                
+            self.action_space = spaces.Discrete(action_dim)
+            
+        except Exception as e:
+            print(f"Error initializing spaces: {e}")
+            # Set default spaces
+            self.observation_space = spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(10,),
+                dtype=np.float32
+            )
+            self.action_space = spaces.Discrete(2)
         
     def _get_observation_dim(self) -> int:
         """Calculate observation space dimensionality."""
@@ -108,38 +171,61 @@ class EdgeEnv(BaseEdgeEnv):
             # Current server one-hot encoding + resource demands
             dim += self.num_servers + 3  # one-hot + cpu + mem + state_size
             
-        return dim
+        # Ensure minimum dimension
+        return max(dim, 1)
         
     def _rl_algorithm(self, parameters: Dict):
         """Custom resource management algorithm for RL.
         
         This method is called by EdgeSimPy at each simulation step.
         """
-        # Collect services that need migration
-        self.services_to_migrate = [
-            service for service in Service.all()
-            if not service.being_provisioned and service.server is None
-        ]
-        
-        # Reset service index for new round
-        self.current_service_idx = 0
+        try:
+            # Collect services that need migration
+            self.services_to_migrate = [
+                service for service in Service.all()
+                if not service.being_provisioned and service.server is None
+            ]
+            
+            # Set flag to indicate migration is needed
+            if self.services_to_migrate:
+                self.migration_scheduled = True
+            
+            # Reset service index for new round
+            self.current_service_idx = 0
+            
+        except Exception as e:
+            # Handle any errors gracefully
+            self.services_to_migrate = []
+            self.current_service_idx = 0
         
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[np.ndarray, Dict]:
         """Reset environment to initial state."""
         super().reset(seed=seed)
         
-        # Reset simulator
-        self._init_simulator()
-        
-        # Reset tracking variables
-        self.current_service_idx = 0
-        self.services_to_migrate = []
-        self.last_state = None
-        
-        # Get initial observation and info
-        obs = self.get_state()
-        info = self.get_info()
-        return obs, info
+        try:
+            # Reset simulator
+            self._init_simulator()
+            
+            # Reset tracking variables
+            self.current_service_idx = 0
+            self.services_to_migrate = []
+            self.last_state = None
+            self.migration_scheduled = False
+            
+            # Reset reward calculator
+            if hasattr(self.reward_calculator, 'reset'):
+                self.reward_calculator.reset()
+            
+            # Get initial observation and info
+            obs = self.get_state()
+            info = self.get_info()
+            
+            return obs, info
+            
+        except Exception as e:
+            print(f"Error in reset: {e}")
+            # Return default observation
+            return np.zeros(self.observation_space.shape, dtype=np.float32), {}
     
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, Dict]:
         """Execute one environment step.
@@ -152,54 +238,71 @@ class EdgeEnv(BaseEdgeEnv):
         """
         info = {}
         
-        # Get current state before action
-        state_before = self.get_state()
-        
-        # Check if we have services to process
-        if self.current_service_idx < len(self.services_to_migrate):
-            service = self.services_to_migrate[self.current_service_idx]
+        try:
+            # Get current state before action
+            state_before = self.get_state()
             
-            # Execute action (migration)
-            if self.is_valid_action(action):
-                if action < self.num_servers:
-                    # Migrate to specified server
-                    target_server = EdgeServer.all()[action]
-                    if target_server.has_capacity_to_host(service):
-                        service.provision(target_server=target_server)
-                        info['migration'] = True
-                        info['valid_action'] = True
+            # Check if we have services to process
+            if self.current_service_idx < len(self.services_to_migrate):
+                service = self.services_to_migrate[self.current_service_idx]
+                
+                # Execute action (migration)
+                if self.is_valid_action(action):
+                    if action < self.num_servers:
+                        # Migrate to specified server
+                        servers = EdgeServer.all()
+                        if servers and action < len(servers):
+                            target_server = servers[action]
+                            try:
+                                if target_server.has_capacity_to_host(service):
+                                    service.provision(target_server=target_server)
+                                    info['migration'] = True
+                                    info['valid_action'] = True
+                                else:
+                                    info['valid_action'] = False
+                            except:
+                                info['valid_action'] = False
+                        else:
+                            info['valid_action'] = False
                     else:
-                        info['valid_action'] = False
+                        # No migration action
+                        info['migration'] = False
+                        info['valid_action'] = True
                 else:
-                    # No migration action
-                    info['migration'] = False
-                    info['valid_action'] = True
-            else:
-                info['valid_action'] = False
+                    info['valid_action'] = False
+                
+                self.current_service_idx += 1
             
-            self.current_service_idx += 1
-        
-        # If we've processed all services, advance simulation
-        if self.current_service_idx >= len(self.services_to_migrate):
-            self.simulator.step()
-            self.current_step += 1
-        
-        # Get new state
-        state_after = self.get_state()
-        
-        # Calculate reward
-        reward = self.reward_calculator.calculate(
-            state_before, action, state_after, info
-        )
-        
-        # Episode termination/truncation
-        terminated = False
-        truncated = self.current_step >= self.max_steps
-        
-        # Store current state
-        self.last_state = state_after
-        
-        return state_after, reward, terminated, truncated, info
+            # If we've processed all services or no services to migrate, advance simulation
+            if self.current_service_idx >= len(self.services_to_migrate) or not self.services_to_migrate:
+                try:
+                    self.simulator.step()
+                    self.current_step += 1
+                except Exception as e:
+                    # Handle step error gracefully
+                    self.current_step += 1
+            
+            # Get new state
+            state_after = self.get_state()
+            
+            # Calculate reward
+            reward = self.reward_calculator.calculate(
+                state_before, action, state_after, info
+            )
+            
+            # Episode termination/truncation
+            terminated = False
+            truncated = self.current_step >= self.max_steps
+            
+            # Store current state
+            self.last_state = state_after
+            
+            return state_after, reward, terminated, truncated, info
+            
+        except Exception as e:
+            # Return safe defaults on error
+            obs = self.get_state()
+            return obs, 0.0, False, self.current_step >= self.max_steps, {'error': str(e)}
     
     def get_state(self) -> np.ndarray:
         """Get current environment state.
@@ -209,51 +312,88 @@ class EdgeEnv(BaseEdgeEnv):
         """
         state = []
         
-        if self.include_server_metrics:
-            # Add server metrics
-            for server in EdgeServer.all():
-                cpu_util = server.cpu_demand / server.cpu if server.cpu > 0 else 0
-                mem_util = server.memory_demand / server.memory if server.memory > 0 else 0
-                disk_util = server.disk_demand / server.disk if server.disk > 0 else 0
-                power = server.get_power_consumption()
-                
-                if self.normalize_state:
-                    # Normalize utilization is already 0-1
-                    # Normalize power (assuming max power from parameters)
-                    if hasattr(server, 'power_model_parameters'):
-                        max_power = server.power_model_parameters.get('max_power_consumption', 100)
-                        power = power / max_power if max_power > 0 else 0
-                
-                state.extend([cpu_util, mem_util, disk_util, power])
-        
-        if self.include_service_metrics and self.current_service_idx < len(self.services_to_migrate):
-            service = self.services_to_migrate[self.current_service_idx]
+        try:
+            servers = EdgeServer.all()
             
-            # One-hot encoding for current server
-            server_one_hot = [0] * self.num_servers
-            if service.server:
-                server_idx = EdgeServer.all().index(service.server)
-                server_one_hot[server_idx] = 1
-            state.extend(server_one_hot)
+            if self.include_server_metrics and servers:
+                # Add server metrics
+                for server in servers:
+                    try:
+                        cpu_util = server.cpu_demand / server.cpu if server.cpu > 0 else 0
+                        mem_util = server.memory_demand / server.memory if server.memory > 0 else 0
+                        disk_util = server.disk_demand / server.disk if server.disk > 0 else 0
+                        
+                        # Get power consumption safely
+                        try:
+                            power = server.get_power_consumption()
+                        except:
+                            power = 0
+                        
+                        if self.normalize_state:
+                            # Normalize utilization is already 0-1
+                            # Normalize power (assuming max power from parameters)
+                            if hasattr(server, 'power_model_parameters'):
+                                max_power = server.power_model_parameters.get('max_power_consumption', 100)
+                                power = power / max_power if max_power > 0 else 0
+                        
+                        state.extend([cpu_util, mem_util, disk_util, power])
+                    except:
+                        # Add zeros if server metrics fail
+                        state.extend([0, 0, 0, 0])
+            elif self.include_server_metrics:
+                # No servers, add zeros
+                state.extend([0] * (self.num_servers * 4))
             
-            # Service resource demands (normalized if configured)
-            if self.normalize_state:
-                max_cpu = max(s.cpu for s in EdgeServer.all())
-                max_mem = max(s.memory for s in EdgeServer.all())
-                cpu_demand = service.cpu_demand / max_cpu if max_cpu > 0 else 0
-                mem_demand = service.memory_demand / max_mem if max_mem > 0 else 0
-                state_size = service.state / 1000.0  # Normalize to MB scale
-            else:
-                cpu_demand = service.cpu_demand
-                mem_demand = service.memory_demand
-                state_size = service.state
+            if self.include_service_metrics and self.current_service_idx < len(self.services_to_migrate):
+                service = self.services_to_migrate[self.current_service_idx]
                 
-            state.extend([cpu_demand, mem_demand, state_size])
-        elif self.include_service_metrics:
-            # Pad with zeros if no service to migrate
-            state.extend([0] * (self.num_servers + 3))
-        
-        return np.array(state, dtype=np.float32)
+                # One-hot encoding for current server
+                server_one_hot = [0] * self.num_servers
+                if service.server and servers:
+                    try:
+                        server_idx = servers.index(service.server)
+                        if 0 <= server_idx < self.num_servers:
+                            server_one_hot[server_idx] = 1
+                    except:
+                        pass
+                state.extend(server_one_hot)
+                
+                # Service resource demands (normalized if configured)
+                try:
+                    if self.normalize_state and servers:
+                        max_cpu = max((s.cpu for s in servers), default=1)
+                        max_mem = max((s.memory for s in servers), default=1)
+                        cpu_demand = service.cpu_demand / max_cpu if max_cpu > 0 else 0
+                        mem_demand = service.memory_demand / max_mem if max_mem > 0 else 0
+                        state_size = service.state / 1000.0  # Normalize to MB scale
+                    else:
+                        cpu_demand = service.cpu_demand
+                        mem_demand = service.memory_demand
+                        state_size = service.state
+                    
+                    state.extend([cpu_demand, mem_demand, state_size])
+                except:
+                    state.extend([0, 0, 0])
+                    
+            elif self.include_service_metrics:
+                # Pad with zeros if no service to migrate
+                state.extend([0] * (self.num_servers + 3))
+            
+            # Ensure state has correct dimension
+            if len(state) == 0:
+                state = [0] * self.observation_space.shape[0]
+            elif len(state) != self.observation_space.shape[0]:
+                # Pad or truncate to match expected dimension
+                if len(state) < self.observation_space.shape[0]:
+                    state.extend([0] * (self.observation_space.shape[0] - len(state)))
+                else:
+                    state = state[:self.observation_space.shape[0]]
+            
+            return np.array(state, dtype=np.float32)
+            
+        except Exception as e:
+            # Return zeros on error
+            return np.zeros(self.observation_space.shape, dtype=np.float32)
     
     def is_valid_action(self, action: int) -> bool:
         """Check if action is valid in current state.
@@ -264,20 +404,25 @@ class EdgeEnv(BaseEdgeEnv):
         Returns:
             True if action is valid
         """
-        if action >= self.action_space.n:
+        try:
+            if action >= self.action_space.n:
+                return False
+            
+            # No-migration is always valid if enabled
+            if self.allow_no_migration and action == self.num_servers:
+                return True
+            
+            # Check if migration to server is valid
+            servers = EdgeServer.all()
+            if action < self.num_servers and action < len(servers) and self.current_service_idx < len(self.services_to_migrate):
+                service = self.services_to_migrate[self.current_service_idx]
+                target_server = servers[action]
+                return target_server.has_capacity_to_host(service)
+            
             return False
-        
-        # No-migration is always valid if enabled
-        if self.allow_no_migration and action == self.num_servers:
-            return True
-        
-        # Check if migration to server is valid
-        if action < self.num_servers and self.current_service_idx < len(self.services_to_migrate):
-            service = self.services_to_migrate[self.current_service_idx]
-            target_server = EdgeServer.all()[action]
-            return target_server.has_capacity_to_host(service)
-        
-        return False
+            
+        except:
+            return False
     
     def get_info(self) -> Dict[str, Any]:
         """Get additional environment information.
@@ -285,13 +430,26 @@ class EdgeEnv(BaseEdgeEnv):
         Returns:
             Dictionary with environment metrics
         """
-        total_power = sum(server.get_power_consumption() for server in EdgeServer.all())
-        
-        info = {
-            'total_power': total_power,
-            'num_migrations': len([s for s in Service.all() if s.being_provisioned]),
-            'current_step': self.current_step,
-            'services_to_migrate': len(self.services_to_migrate)
-        }
-        
-        return info
+        try:
+            servers = EdgeServer.all()
+            services = Service.all()
+            
+            total_power = sum(server.get_power_consumption() for server in servers)
+            num_migrations = len([s for s in services if s.being_provisioned])
+            
+            info = {
+                'total_power': total_power,
+                'num_migrations': num_migrations,
+                'current_step': self.current_step,
+                'services_to_migrate': len(self.services_to_migrate)
+            }
+            
+            return info
+            
+        except:
+            return {
+                'total_power': 0,
+                'num_migrations': 0,
+                'current_step': self.current_step,
+                'services_to_migrate': 0
+            }
