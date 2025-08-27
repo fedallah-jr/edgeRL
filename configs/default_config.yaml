@@ -1,0 +1,47 @@
+# Default configuration for EdgeSim-RL
+
+# Environment configuration
+env:
+  name: "EdgeEnv"
+  dataset_path: "datasets/sample_dataset.json"
+  max_steps: 1000
+  tick_duration: 1
+  tick_unit: "seconds"
+  
+  # State space configuration
+  state:
+    include_server_metrics: true
+    include_service_metrics: true
+    normalize: true
+  
+  # Action space configuration  
+  action:
+    type: "discrete"  # discrete or continuous
+    allow_no_migration: true
+
+# Reward configuration
+reward:
+  type: "power"  # power, latency, composite
+  power_weight: 1.0
+  normalize: true
+  penalty_invalid_action: -10.0
+
+# Training configuration
+training:
+  seed: 42
+  num_episodes: 1000
+  checkpoint_freq: 100
+  checkpoint_dir: "checkpoints/"
+  log_dir: "logs/"
+  
+# Resource allocation
+resources:
+  num_workers: 2
+  num_gpus: 0
+  num_cpus_per_worker: 1
+  
+# Evaluation configuration
+evaluation:
+  eval_episodes: 10
+  eval_interval: 50
+  save_best_model: true
