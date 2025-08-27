@@ -12,16 +12,31 @@ from ray.rllib.core.rl_module.rl_module import RLModuleSpec
 class EdgeSimCallbacks(DefaultCallbacks):
     """Custom callbacks for monitoring EdgeSim training."""
     
-    def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
-        """Called at the end of each episode."""
-        # Get custom metrics from environment
+    def on_episode_end(
+        self,
+        *,
+        episode,
+        env_runner=None,
+        metrics_logger=None,
+        env=None,
+        env_index: int = 0,
+        rl_module=None,
+        **kwargs,
+    ):
+        """Called at the end of each episode (new API stack)."""
+        # Get custom metrics from episode if available
         try:
-            env = base_env.get_unwrapped()[0]
-            if hasattr(env, 'get_info'):
-                info = env.get_info()
-                for key, value in info.items():
-                    episode.custom_metrics[key] = value
-        except:
+            if hasattr(episode, 'get_infos'):
+                # Get the last info dict from the episode
+                infos = episode.get_infos()
+                if infos and len(infos) > 0:
+                    last_info = infos[-1]
+                    # Add custom metrics to the episode
+                    for key, value in last_info.items():
+                        if isinstance(value, (int, float)):
+                            episode.set_custom_metric(key, value)
+        except Exception as e:
+            # Silently ignore callback errors to not disrupt training
             pass
 
 
