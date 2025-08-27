@@ -6,6 +6,7 @@ import numpy as np
 import ray
 from ray.rllib.algorithms.dqn import DQNConfig
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
+from ray.rllib.core.rl_module.rl_module import RLModuleSpec
 
 
 class EdgeSimCallbacks(DefaultCallbacks):
@@ -119,18 +120,6 @@ class RLTrainer:
             grad_clip=dqn_cfg_dict.get('grad_clip', 40)
         )
         
-        # Model configuration - using rl_module API
-        model_config = dqn_cfg_dict.get('model', {})
-        cfg = cfg.rl_module(
-            rl_module_spec={
-                "module_class": "ray.rllib.algorithms.dqn.dqn_catalog.DQNTorchRLModule",
-                "model_config_dict": {
-                    "fcnet_hiddens": model_config.get("fcnet_hiddens", [256, 256]),
-                    "fcnet_activation": model_config.get("fcnet_activation", "relu"),
-                }
-            }
-        )
-        
         # Callbacks configuration
         cfg = cfg.callbacks(callbacks_class=EdgeSimCallbacks)
         
@@ -168,9 +157,12 @@ class RLTrainer:
     
     def train(self):
         """Run training loop."""
-        # Setup directories
+        # Setup directories - use absolute path
         checkpoint_dir = self.training_config.get('checkpoint_dir', 'checkpoints/')
+        checkpoint_dir = os.path.abspath(checkpoint_dir)
         os.makedirs(checkpoint_dir, exist_ok=True)
+        best_checkpoint_dir = os.path.join(checkpoint_dir, "best")
+        os.makedirs(best_checkpoint_dir, exist_ok=True)
         
         # Training loop
         num_episodes = self.training_config.get('num_episodes', 1000)
@@ -233,7 +225,7 @@ class RLTrainer:
                 if episode_reward > best_reward:
                     best_reward = episode_reward
                     if self.training_config.get('evaluation', {}).get('save_best_model', True):
-                        best_checkpoint = self.trainer.save(os.path.join(checkpoint_dir, "best"))
+                        best_checkpoint = self.trainer.save(best_checkpoint_dir)
                         print(f"  New best model saved with reward: {best_reward:.2f}")
             
         except KeyboardInterrupt:
