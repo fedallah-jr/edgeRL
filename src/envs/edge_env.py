@@ -459,16 +459,3 @@ class EdgeEnv(BaseEdgeEnv):
                 'current_step': self.current_step,
                 'services_to_migrate': 0
             }
-    
-    def get_current_service(self):
-        """Expose the current service being considered for a migration decision.
-        
-        Returns:
-            Service object or None if no service is currently selected.
-        """
-        try:
-            if self.current_service_idx < len(self.services_to_migrate):
-                return self.services_to_migrate[self.current_service_idx]
-        except Exception:
-            pass
-        return None
