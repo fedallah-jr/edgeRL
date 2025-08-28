@@ -157,6 +157,12 @@ def main():
     if args.num_gpus is not None:
         config['resources']['num_gpus'] = args.num_gpus
     
+    # Ensure evaluation section exists and honor --eval-episodes for RLlib evaluation
+    if 'evaluation' not in config:
+        config['evaluation'] = {}
+    if args.eval_episodes is not None:
+        config['evaluation']['eval_episodes'] = args.eval_episodes
+    
     # Print configuration
     print("Configuration:")
     print("-" * 50)
