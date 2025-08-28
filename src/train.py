@@ -122,6 +122,14 @@ def parse_args():
         default=10,
         help='Number of evaluation episodes'
     )
+
+    parser.add_argument(
+        '--baseline',
+        type=str,
+        default=None,
+        choices=['worst_fit'],
+        help='Evaluate a baseline policy instead of an RL checkpoint (e.g., worst_fit)'
+    )
     
     return parser.parse_args()
 
@@ -165,14 +173,30 @@ def main():
         trainer = RLTrainer(config)
         
         if args.evaluate:
-            # Run evaluation
-            checkpoint_path = args.checkpoint or os.path.join(
-                config['training']['checkpoint_dir'], 'best'
-            )
-            trainer.evaluate(
-                checkpoint_path=checkpoint_path,
-                num_episodes=args.eval_episodes
-            )
+            # Baseline evaluation mode
+            if args.baseline:
+                from src.baselines.worst_fit import evaluate_worst_fit
+                from src.envs.edge_env import EdgeEnv
+                print(f"\nRunning baseline evaluation: {args.baseline}")
+                if args.baseline == 'worst_fit':
+                    results = evaluate_worst_fit(
+                        env_class=EdgeEnv,
+                        env_config=config.get('env', {}),
+                        num_episodes=args.eval_episodes,
+                        log_root=config.get('training', {}).get('log_dir', 'logs/')
+                    )
+                    print(f"Baseline mean reward: {results['mean_reward']:.4f} ± {results['std_reward']:.4f}")
+                else:
+                    print(f"Unsupported baseline: {args.baseline}")
+            else:
+                # RL evaluation
+                checkpoint_path = args.checkpoint or os.path.join(
+                    config['training']['checkpoint_dir'], 'best'
+                )
+                trainer.evaluate(
+                    checkpoint_path=checkpoint_path,
+                    num_episodes=args.eval_episodes
+                )
         else:
             # Run training
             if args.checkpoint:

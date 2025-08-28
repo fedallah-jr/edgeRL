@@ -1,6 +1,8 @@
 """RLlib algorithm trainer wrapper."""
 
 import os
+import csv
+from datetime import datetime
 from typing import Dict, Any, Optional
 import numpy as np
 import ray
@@ -10,7 +12,12 @@ from ray.rllib.core.rl_module.rl_module import RLModuleSpec
 
 
 class EdgeSimCallbacks(DefaultCallbacks):
-    """Custom callbacks for monitoring EdgeSim training."""
+    """Custom callbacks for monitoring EdgeSim training and evaluation logging."""
+
+    # Class-level flags for evaluation logging
+    SAVE_EVAL_METRICS: bool = False
+    EVAL_DIR: Optional[str] = None
+    EP_COUNTER: int = 0
     
     def on_episode_end(
         self,
@@ -24,19 +31,47 @@ class EdgeSimCallbacks(DefaultCallbacks):
         **kwargs,
     ):
         """Called at the end of each episode (new API stack)."""
-        # Get custom metrics from episode if available
+        # Get custom metrics from episode if available and save eval metrics if requested
         try:
-            if hasattr(episode, 'get_infos'):
-                # Get the last info dict from the episode
-                infos = episode.get_infos()
-                if infos and len(infos) > 0:
-                    last_info = infos[-1]
-                    # Add custom metrics to the episode
-                    for key, value in last_info.items():
-                        if isinstance(value, (int, float)):
+            infos = episode.get_infos() if hasattr(episode, 'get_infos') else None
+            if infos and len(infos) > 0:
+                # Attach last-step scalar metrics back onto episode custom metrics
+                last_info = infos[-1]
+                for key, value in last_info.items():
+                    if isinstance(value, (int, float)):
+                        try:
                             episode.set_custom_metric(key, value)
-        except Exception as e:
-            # Silently ignore callback errors to not disrupt training
+                        except Exception:
+                            pass
+
+                # If evaluation saving is enabled, dump per-step info to CSV
+                if EdgeSimCallbacks.SAVE_EVAL_METRICS and EdgeSimCallbacks.EVAL_DIR:
+                    EdgeSimCallbacks.EP_COUNTER += 1
+                    ep_idx = EdgeSimCallbacks.EP_COUNTER
+
+                    # Build union of keys across all infos
+                    keys = set()
+                    for it in infos:
+                        if isinstance(it, dict):
+                            keys.update(it.keys())
+                    keys = sorted(list(keys))
+
+                    # Ensure directory exists
+                    os.makedirs(EdgeSimCallbacks.EVAL_DIR, exist_ok=True)
+                    steps_csv = os.path.join(EdgeSimCallbacks.EVAL_DIR, f"episode_{ep_idx}_steps.csv")
+
+                    # Write CSV
+                    with open(steps_csv, mode='w', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["step_index"] + keys)
+                        for i, it in enumerate(infos):
+                            row = [i]
+                            for k in keys:
+                                v = it.get(k, "") if isinstance(it, dict) else ""
+                                row.append(v)
+                            writer.writerow(row)
+        except Exception:
+            # Silently ignore callback errors to not disrupt training/eval
             pass
 
 
@@ -285,7 +320,7 @@ class RLTrainer:
         return self.trainer
     
     def evaluate(self, checkpoint_path: Optional[str] = None, num_episodes: int = 10):
-        """Evaluate trained model.
+        """Evaluate trained model and save metrics to disk.
         
         Args:
             checkpoint_path: Path to checkpoint to load
@@ -302,7 +337,26 @@ class RLTrainer:
             except Exception as e:
                 print(f"Error loading checkpoint: {e}")
         
+        # Prepare evaluation output directory
+        log_root = self.training_config.get('log_dir', 'logs/')
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        eval_root = os.path.join(os.path.abspath(log_root), 'eval', ts)
+        steps_dir = os.path.join(eval_root, 'steps')
+        os.makedirs(steps_dir, exist_ok=True)
+
+        # Enable per-episode step logging via callback
+        EdgeSimCallbacks.SAVE_EVAL_METRICS = True
+        EdgeSimCallbacks.EVAL_DIR = steps_dir
+        EdgeSimCallbacks.EP_COUNTER = 0
+
+        # Prepare summary CSV
+        summary_csv = os.path.join(eval_root, 'eval_summary.csv')
+        with open(summary_csv, mode='w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["episode", "reward"])
+        
         print(f"\nEvaluating for {num_episodes} episodes...")
+        print(f"Evaluation logs will be saved under: {eval_root}")
         
         # Run evaluation
         results = []
@@ -322,9 +376,21 @@ class RLTrainer:
                 )
                 results.append(episode_reward)
                 print(f"  Episode {episode + 1}: Reward = {episode_reward:.2f}")
+
+                # Append to summary CSV
+                with open(summary_csv, mode='a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([episode + 1, episode_reward])
             except Exception as e:
                 print(f"  Episode {episode + 1}: Error - {e}")
                 results.append(0)
+                with open(summary_csv, mode='a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([episode + 1, 0])
+        
+        # Disable step logging
+        EdgeSimCallbacks.SAVE_EVAL_METRICS = False
+        EdgeSimCallbacks.EVAL_DIR = None
         
         # Calculate statistics
         if results:
@@ -336,11 +402,19 @@ class RLTrainer:
         
         print(f"\nEvaluation Results:")
         print(f"  Mean Reward: {mean_reward:.2f} ± {std_reward:.2f}")
+
+        # Save summary stats
+        summary_txt = os.path.join(eval_root, 'summary.txt')
+        with open(summary_txt, 'w') as f:
+            f.write(f"Mean Reward: {mean_reward:.6f}\n")
+            f.write(f"Std Reward: {std_reward:.6f}\n")
+            f.write(f"Episodes: {len(results)}\n")
         
         return {
             "mean_reward": mean_reward,
             "std_reward": std_reward,
-            "episodes": results
+            "episodes": results,
+            "eval_dir": eval_root,
         }
     
     def close(self):

@@ -310,6 +310,14 @@ class EdgeEnv(BaseEdgeEnv):
                 state_before, action, state_after, info
             )
             
+            # Add runtime metrics to info for logging/evaluation
+            try:
+                runtime_info = self.get_info()
+                if isinstance(runtime_info, dict):
+                    info.update(runtime_info)
+            except:
+                pass
+            
             # Episode termination/truncation
             terminated = False
             truncated = self.current_step >= self.max_steps
@@ -473,3 +481,16 @@ class EdgeEnv(BaseEdgeEnv):
                 'current_step': self.current_step,
                 'services_to_migrate': 0
             }
+    
+    def get_current_service(self):
+        """Expose the current service being considered for a migration decision.
+        
+        Returns:
+            Service object or None if no service is currently selected.
+        """
+        try:
+            if self.current_service_idx < len(self.services_to_migrate):
+                return self.services_to_migrate[self.current_service_idx]
+        except Exception:
+            pass
+        return None
