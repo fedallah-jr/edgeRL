@@ -127,8 +127,8 @@ def parse_args():
         '--baseline',
         type=str,
         default=None,
-        choices=['worst_fit'],
-        help='Evaluate a baseline policy instead of an RL checkpoint (e.g., worst_fit)'
+        choices=['worst_fit', 'random_fit'],
+        help='Evaluate a baseline policy instead of an RL checkpoint (e.g., worst_fit, random_fit)'
     )
     
     return parser.parse_args()
@@ -185,11 +185,21 @@ def main():
                         num_episodes=args.eval_episodes,
                         log_root=config.get('training', {}).get('log_dir', 'logs/')
                     )
+                elif args.baseline == 'random_fit':
+                    from src.baselines.random_fit import evaluate_random_fit
+                    results = evaluate_random_fit(
+                        env_class=EdgeEnv,
+                        env_config=config.get('env', {}),
+                        num_episodes=args.eval_episodes,
+                        log_root=config.get('training', {}).get('log_dir', 'logs/')
+                    )
+                else:
+                    print(f"Unsupported baseline: {args.baseline}")
+                    results = None
+                if results is not None:
                     print(f"Baseline mean reward: {results['mean_reward']:.4f} ± {results['std_reward']:.4f}")
                     if isinstance(results, dict) and 'eval_dir' in results:
                         print(f"Baseline evaluation logs saved under: {results['eval_dir']}")
-                else:
-                    print(f"Unsupported baseline: {args.baseline}")
             else:
                 # RL evaluation
                 checkpoint_path = args.checkpoint or os.path.join(
