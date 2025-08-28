@@ -488,3 +488,26 @@ class EdgeEnv(BaseEdgeEnv):
                 'current_step': self.current_step,
                 'services_to_migrate': 0
             }
+
+    def get_current_service(self):
+        """Return the current service under decision, if any.
+        
+        Used by baseline policies (e.g., Worst-Fit) that need to inspect the
+        service before calling `step(action)`.
+        """
+        try:
+            # Ensure we have a list of services to process, similar to logic in step()
+            if not self.services_to_migrate:
+                try:
+                    self.services_to_migrate = [
+                        s for s in Service.all() if not s.being_provisioned
+                    ]
+                    self.current_service_idx = 0
+                except Exception:
+                    self.services_to_migrate = []
+                    self.current_service_idx = 0
+            if 0 <= self.current_service_idx < len(self.services_to_migrate):
+                return self.services_to_migrate[self.current_service_idx]
+            return None
+        except Exception:
+            return None
