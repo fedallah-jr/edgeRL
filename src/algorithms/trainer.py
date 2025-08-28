@@ -417,13 +417,86 @@ class RLTrainer:
                     while not (terminated or truncated):
                         # Use RLlib's (still available) convenience API for single-action inference.
                         try:
+                            # Preferred (even if deprecated): still widely supported
                             action = self.trainer.compute_single_action(obs, explore=False)
-                        except Exception:
-                            # Fallback try: Some versions expose `predict`
+                        except Exception as e1:
+                            # Next: try batched API
                             try:
-                                action = self.trainer.predict(obs)
-                            except Exception as ee:
-                                raise RuntimeError(f"Cannot compute action: {ee}")
+                                acts = self.trainer.compute_actions([obs], explore=False)
+                                # Some versions return (actions, state_outs, info)
+                                if isinstance(acts, tuple):
+                                    action = acts[0][0]
+                                else:
+                                    action = acts[0]
+                            except Exception:
+                                # Last resort: Use RLModule directly (new API)
+                                try:
+                                    import numpy as _np
+                                    import torch as _torch
+                                    module = None
+                                    # Try get default module first
+                                    try:
+                                        module = self.trainer.get_module()
+                                    except Exception:
+                                        pass
+                                    if module is None:
+                                        # Try common module IDs
+                                        for mid in ("default_module", "default_policy", "policy_0"):
+                                            try:
+                                                module = self.trainer.get_module(mid)
+                                                if module is not None:
+                                                    break
+                                            except Exception:
+                                                continue
+                                    if module is None:
+                                        # Try iter_modules() iterator
+                                        it = getattr(self.trainer, "iter_modules", None)
+                                        if callable(it):
+                                            try:
+                                                first = next(it())
+                                                # Could be (module_id, module) or just module
+                                                module = first[1] if isinstance(first, (list, tuple)) and len(first) >= 2 else first
+                                            except Exception:
+                                                pass
+                                    if module is None:
+                                        raise RuntimeError("No RLModule available for inference")
+
+                                    obs_np = _np.asarray(obs, dtype=_np.float32)
+                                    obs_tensor = _torch.from_numpy(obs_np).unsqueeze(0)
+                                    outputs = module.forward_inference({"obs": obs_tensor})
+                                    # Try multiple keys to extract an action
+                                    if isinstance(outputs, dict):
+                                        if "actions" in outputs:
+                                            act_tensor = outputs["actions"]
+                                            if hasattr(act_tensor, "detach"):
+                                                act_np = act_tensor.detach().cpu().numpy()
+                                            else:
+                                                act_np = _np.array(act_tensor)
+                                            action = int(act_np[0]) if act_np.ndim > 0 else int(act_np)
+                                        elif "action_dist_inputs" in outputs:
+                                            logits = outputs["action_dist_inputs"]
+                                            if hasattr(logits, "detach"):
+                                                logits = logits.detach().cpu().numpy()
+                                            action = int(_np.argmax(logits, axis=-1).item() if logits.ndim > 1 else _np.argmax(logits))
+                                        else:
+                                            # Fallback: grab first tensor-like
+                                            first_val = None
+                                            for v in outputs.values():
+                                                first_val = v
+                                                break
+                                            if first_val is None:
+                                                raise RuntimeError("RLModule produced no usable outputs")
+                                            if hasattr(first_val, "detach"):
+                                                first_val = first_val.detach().cpu().numpy()
+                                            action = int(_np.argmax(first_val, axis=-1).item() if getattr(first_val, "ndim", 0) > 1 else _np.argmax(first_val))
+                                    else:
+                                        # outputs is likely a tensor
+                                        out = outputs
+                                        if hasattr(out, "detach"):
+                                            out = out.detach().cpu().numpy()
+                                        action = int(_np.argmax(out, axis=-1).item() if getattr(out, "ndim", 0) > 1 else _np.argmax(out))
+                                except Exception as ee:
+                                    raise RuntimeError(f"Cannot compute action: {ee}")
                         obs, reward, terminated, truncated, step_info = env.step(action)
                         ep_reward += float(reward)
                         step_idx += 1
@@ -498,13 +571,34 @@ class RLTrainer:
             except Exception:
                 pass
 
-        # If path is a directory like .../checkpoints/best, pick most recent subdir
+        # If path is a directory: if it already looks like a checkpoint root (has env_runner), use it;
+        # otherwise, try to find the latest subdir that looks like a checkpoint.
         if os.path.isdir(path):
-            entries = [os.path.join(path, d) for d in os.listdir(path)]
-            entries = [d for d in entries if os.path.isdir(d)]
-            if entries:
-                entries.sort(key=lambda d: os.path.getmtime(d), reverse=True)
-                return entries[0]
+            def _looks_like_checkpoint_dir(p: str) -> bool:
+                return os.path.isdir(os.path.join(p, 'env_runner')) or os.path.isfile(os.path.join(p, 'algorithm_state.pkl'))
+
+            if _looks_like_checkpoint_dir(path):
+                return path
+
+            # First level
+            subdirs = [os.path.join(path, d) for d in os.listdir(path)]
+            subdirs = [d for d in subdirs if os.path.isdir(d)]
+            candidates = [d for d in subdirs if _looks_like_checkpoint_dir(d)]
+
+            # Second level (in case checkpoints are nested one level deeper)
+            if not candidates:
+                for d in subdirs:
+                    try:
+                        nested = [os.path.join(d, n) for n in os.listdir(d)]
+                        nested = [n for n in nested if os.path.isdir(n) and _looks_like_checkpoint_dir(n)]
+                        candidates.extend(nested)
+                    except Exception:
+                        continue
+
+            if candidates:
+                candidates.sort(key=lambda d: os.path.getmtime(d), reverse=True)
+                return candidates[0]
+
         return path
 
     def close(self):
