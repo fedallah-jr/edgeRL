@@ -22,8 +22,10 @@ env:
 # Reward configuration
 reward:
   type: "power"  # power, latency, composite
+  # Default to EdgeAISIM-style reward: sum of inverse server powers
+  mode: "inverse_sum"  # or "diff_total_power" for original behavior
   power_weight: 1.0
-  normalize: true
+  normalize: false
   penalty_invalid_action: -10.0
 
 # Training configuration

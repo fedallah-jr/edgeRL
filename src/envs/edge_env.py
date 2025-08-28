@@ -178,12 +178,14 @@ class EdgeEnv(BaseEdgeEnv):
         """Custom resource management algorithm for RL.
         
         This method is called by EdgeSimPy at each simulation step.
+        Align with EdgeAISIM by considering all services that are not being
+        provisioned as candidates for migration decisions.
         """
         try:
-            # Collect services that need migration
+            # Collect services that are eligible for migration decisions
             self.services_to_migrate = [
                 service for service in Service.all()
-                if not service.being_provisioned and service.server is None
+                if not service.being_provisioned
             ]
             
             # Set flag to indicate migration is needed
@@ -239,6 +241,17 @@ class EdgeEnv(BaseEdgeEnv):
         info = {}
         
         try:
+            # Ensure we have a fresh list of services to process for this scheduling round
+            if not self.services_to_migrate:
+                try:
+                    self.services_to_migrate = [
+                        s for s in Service.all() if not s.being_provisioned
+                    ]
+                    self.current_service_idx = 0
+                except:
+                    self.services_to_migrate = []
+                    self.current_service_idx = 0
+
             # Get current state before action
             state_before = self.get_state()
             
@@ -254,7 +267,11 @@ class EdgeEnv(BaseEdgeEnv):
                         if servers and action < len(servers):
                             target_server = servers[action]
                             try:
-                                if target_server.has_capacity_to_host(service):
+                                # Avoid migrating back to the same server; treat as no-op
+                                if service.server is not None and target_server == service.server:
+                                    info['migration'] = False
+                                    info['valid_action'] = True
+                                elif target_server.has_capacity_to_host(service):
                                     service.provision(target_server=target_server)
                                     info['migration'] = True
                                     info['valid_action'] = True
@@ -273,11 +290,14 @@ class EdgeEnv(BaseEdgeEnv):
                 
                 self.current_service_idx += 1
             
-            # If we've processed all services or no services to migrate, advance simulation
+            # If we've processed all services (one pass), advance simulation time by one tick
             if self.current_service_idx >= len(self.services_to_migrate) or not self.services_to_migrate:
                 try:
                     self.simulator.step()
                     self.current_step += 1
+                    # Reset for next round
+                    self.services_to_migrate = []
+                    self.current_service_idx = 0
                 except Exception as e:
                     # Handle step error gracefully
                     self.current_step += 1
