@@ -132,8 +132,9 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
         from src.utils.eval_utils import summarize_steps_dir, write_summary_files
         per_ep_metrics, aggregates = summarize_steps_dir(steps_dir)
         write_summary_files(eval_root, per_ep_metrics, episode_returns)
-    except Exception:
+    except Exception as e:
         # As a fallback, write minimal summary.txt if utils are unavailable
+        print(f"Enhanced summary generation failed: {e}")
         summary_txt = os.path.join(eval_root, 'summary.txt')
         with open(summary_txt, 'w') as f:
             f.write(f"Mean Reward: {mean_reward:.6f}\n")

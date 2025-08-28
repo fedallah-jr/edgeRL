@@ -192,6 +192,8 @@ def main():
                         log_root=config.get('training', {}).get('log_dir', 'logs/')
                     )
                     print(f"Baseline mean reward: {results['mean_reward']:.4f} ± {results['std_reward']:.4f}")
+                    if isinstance(results, dict) and 'eval_dir' in results:
+                        print(f"Baseline evaluation logs saved under: {results['eval_dir']}")
                 else:
                     print(f"Unsupported baseline: {args.baseline}")
             else:
