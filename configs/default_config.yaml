@@ -21,10 +21,11 @@ env:
 
 # Reward configuration
 reward:
-  type: "power"  # power, latency, composite
-  power_weight: 1.0
-  normalize: true
-  penalty_invalid_action: -10.0
+  # Default to EdgeAISIM-style immediate reward
+  type: "edgeaisim"  # edgeaisim, power, latency, composite
+  power_weight: 1.0  # Used by power/composite rewards
+  normalize: true   # Used by power/composite rewards; edgeaisim ignores this
+  penalty_invalid_action: -10.0  # Used by power reward; edgeaisim ignores unless explicitly set
 
 # Training configuration
 training:

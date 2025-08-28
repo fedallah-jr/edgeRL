@@ -7,6 +7,7 @@ from typing import Dict, Any, Tuple, List, Optional
 from edge_sim_py import *
 from .base_env import BaseEdgeEnv
 from ..rewards.power_reward import PowerReward
+from ..rewards.edge_aisim_reward import EdgeAISIMReward
 
 
 class EdgeEnv(BaseEdgeEnv):
@@ -50,9 +51,15 @@ class EdgeEnv(BaseEdgeEnv):
         
         if reward_type == "power":
             self.reward_calculator = PowerReward(reward_config)
+        elif reward_type in ("edgeaisim", "inverse_power", "edge_ai_sim"):
+            # EdgeAISIM-style immediate reward (sum of inverse power across servers)
+            self.reward_calculator = EdgeAISIMReward(reward_config)
         else:
-            # Default to power reward
-            self.reward_calculator = PowerReward(reward_config)
+            # Default to EdgeAISIM reward when unknown, then fall back to power reward
+            try:
+                self.reward_calculator = EdgeAISIMReward(reward_config)
+            except Exception:
+                self.reward_calculator = PowerReward(reward_config)
         
         # Initialize environment
         self._init_simulator()

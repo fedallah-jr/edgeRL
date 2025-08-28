@@ -305,6 +305,12 @@ class RLTrainer:
                     best_reward = episode_reward
                     if self.training_config.get('evaluation', {}).get('save_best_model', True):
                         best_checkpoint = self.trainer.save(best_checkpoint_dir)
+                        try:
+                            # Persist latest best checkpoint path for easier lookup during evaluation
+                            with open(os.path.join(best_checkpoint_dir, 'latest.txt'), 'w') as f:
+                                f.write(str(best_checkpoint))
+                        except Exception:
+                            pass
                         print(f"  New best model saved with reward: {best_reward:.2f}")
             
         except KeyboardInterrupt:
@@ -329,11 +335,12 @@ class RLTrainer:
         Returns:
             Evaluation results
         """
-        # Load checkpoint if provided
+        # Resolve and load checkpoint if provided
         if checkpoint_path:
             try:
-                self.trainer.restore(checkpoint_path)
-                print(f"Loaded checkpoint from: {checkpoint_path}")
+                resolved = self._resolve_checkpoint_path(checkpoint_path)
+                self.trainer.restore(resolved)
+                print(f"Loaded checkpoint from: {resolved}")
             except Exception as e:
                 print(f"Error loading checkpoint: {e}")
         
@@ -358,35 +365,86 @@ class RLTrainer:
         print(f"\nEvaluating for {num_episodes} episodes...")
         print(f"Evaluation logs will be saved under: {eval_root}")
         
-        # Run evaluation
         results = []
-        for episode in range(num_episodes):
+        
+        # Preferred: Use RLlib evaluate() once if available; otherwise, fall back to manual episodes
+        used_rllib_eval = False
+        try:
+            # Attempt to configure evaluation duration dynamically (best-effort)
+            # Note: Not all RLlib versions expose this, so we just call evaluate() once.
+            eval_result = self.trainer.evaluate()
+            # Many RLlib builds summarize over internal episodes; we still produce num_episodes rows
+            mean_val = self._first_non_none(
+                eval_result.get("evaluation", {}) if isinstance(eval_result, dict) else {},
+                [
+                    ["episode_reward_mean"],
+                    ["episode_return_mean"],
+                    ["env_runners", "episode_reward_mean"],
+                    ["env_runners", "episode_return_mean"],
+                ],
+                default=None,
+            )
+            if mean_val is not None:
+                # Emit a single line using RLlib's evaluation result
+                results = [mean_val] * num_episodes
+                for i in range(num_episodes):
+                    print(f"  Episode {i + 1}: Reward = {mean_val:.2f}")
+                    with open(summary_csv, mode='a', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow([i + 1, mean_val])
+                used_rllib_eval = True
+        except Exception as e:
+            print(f"RLlib evaluate() not available or failed: {e}. Falling back to manual evaluation.")
+        
+        if not used_rllib_eval:
+            # Manual evaluation loop using a local env and the trained Algorithm for inference
             try:
-                result = self.trainer.evaluate()
-                eval_dict = result.get("evaluation", {}) if isinstance(result, dict) else {}
-                episode_reward = self._first_non_none(
-                    eval_dict,
-                    [
-                        ["episode_reward_mean"],
-                        ["episode_return_mean"],
-                        ["env_runners", "episode_reward_mean"],
-                        ["env_runners", "episode_return_mean"],
-                    ],
-                    default=0.0,
-                )
-                results.append(episode_reward)
-                print(f"  Episode {episode + 1}: Reward = {episode_reward:.2f}")
-
-                # Append to summary CSV
-                with open(summary_csv, mode='a', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow([episode + 1, episode_reward])
+                from ..envs.edge_env import EdgeEnv
+                env = EdgeEnv(self.env_config)
             except Exception as e:
-                print(f"  Episode {episode + 1}: Error - {e}")
-                results.append(0)
-                with open(summary_csv, mode='a', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow([episode + 1, 0])
+                print(f"Failed to construct evaluation environment: {e}")
+                env = None
+            
+            for episode in range(num_episodes):
+                ep_reward = 0.0
+                try:
+                    if env is None:
+                        raise RuntimeError("No evaluation environment available")
+                    obs, info = env.reset()
+                    terminated = False
+                    truncated = False
+                    step_idx = 0
+                    while not (terminated or truncated):
+                        # Use RLlib's (still available) convenience API for single-action inference.
+                        try:
+                            action = self.trainer.compute_single_action(obs, explore=False)
+                        except Exception:
+                            # Fallback try: Some versions expose `predict`
+                            try:
+                                action = self.trainer.predict(obs)
+                            except Exception as ee:
+                                raise RuntimeError(f"Cannot compute action: {ee}")
+                        obs, reward, terminated, truncated, step_info = env.step(action)
+                        ep_reward += float(reward)
+                        step_idx += 1
+                    print(f"  Episode {episode + 1}: Reward = {ep_reward:.2f}")
+                    results.append(ep_reward)
+                    with open(summary_csv, mode='a', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow([episode + 1, ep_reward])
+                except Exception as e:
+                    print(f"  Episode {episode + 1}: Error - {e}")
+                    results.append(0.0)
+                    with open(summary_csv, mode='a', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow([episode + 1, 0.0])
+            
+            # Ensure env is closed
+            try:
+                if env is not None:
+                    env.close()
+            except Exception:
+                pass
         
         # Disable step logging
         EdgeSimCallbacks.SAVE_EVAL_METRICS = False
@@ -417,6 +475,38 @@ class RLTrainer:
             "eval_dir": eval_root,
         }
     
+    def _resolve_checkpoint_path(self, checkpoint_path: str) -> str:
+        """Resolve a user-provided checkpoint path to a concrete checkpoint directory.
+
+        Accepts paths to:
+        - a concrete RLlib checkpoint directory
+        - a directory (e.g., checkpoints/best) containing sub-checkpoints
+        - a text file containing the absolute path to the latest checkpoint
+        """
+        import os
+
+        path = os.path.abspath(checkpoint_path)
+
+        # If a text file exists (written during training), read the real checkpoint path
+        if os.path.isfile(path) and path.lower().endswith('.txt'):
+            try:
+                with open(path, 'r') as f:
+                    candidate = f.read().strip()
+                candidate = os.path.abspath(candidate)
+                if os.path.exists(candidate):
+                    return candidate
+            except Exception:
+                pass
+
+        # If path is a directory like .../checkpoints/best, pick most recent subdir
+        if os.path.isdir(path):
+            entries = [os.path.join(path, d) for d in os.listdir(path)]
+            entries = [d for d in entries if os.path.isdir(d)]
+            if entries:
+                entries.sort(key=lambda d: os.path.getmtime(d), reverse=True)
+                return entries[0]
+        return path
+
     def close(self):
         """Clean up resources."""
         if self.trainer:
