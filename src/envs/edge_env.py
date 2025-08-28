@@ -5,6 +5,7 @@ import gymnasium as gym
 from gymnasium import spaces
 from typing import Dict, Any, Tuple, List, Optional
 from edge_sim_py import *
+from edge_sim_py.activation_schedulers.random_scheduler import RandomScheduler
 from .base_env import BaseEdgeEnv
 from ..rewards.power_reward import PowerReward
 from ..rewards.edge_aisim_reward import EdgeAISIMReward
@@ -45,6 +46,10 @@ class EdgeEnv(BaseEdgeEnv):
         self.action_config = config.get("action", {})
         self.allow_no_migration = self.action_config.get("allow_no_migration", True)
         
+        # Randomization and scheduler configuration
+        self.randomize_initial_placement = bool(config.get("randomize_initial_placement", True))
+        self.use_random_scheduler = bool(config.get("use_random_scheduler", True))
+        
         # Reward configuration
         reward_config = config.get("reward", {})
         reward_type = reward_config.get("type", "power")
@@ -75,13 +80,17 @@ class EdgeEnv(BaseEdgeEnv):
         """Initialize EdgeSimPy simulator."""
         try:
             # Create simulator with our custom algorithm
-            self.simulator = Simulator(
-                tick_duration=self.tick_duration,
-                tick_unit=self.tick_unit,
-                stopping_criterion=lambda model: model.schedule.steps >= self.max_steps,
-                resource_management_algorithm=self._rl_algorithm,
-                dump_interval=float('inf')  # Disable automatic dumping
-            )
+            sim_kwargs = {
+                "tick_duration": self.tick_duration,
+                "tick_unit": self.tick_unit,
+                "stopping_criterion": lambda model: model.schedule.steps >= self.max_steps,
+                "resource_management_algorithm": self._rl_algorithm,
+                "dump_interval": float('inf'),  # Disable automatic dumping
+            }
+            if self.use_random_scheduler:
+                # Use EdgeSimPy's RandomScheduler to introduce stochastic agent activation order
+                sim_kwargs["scheduler"] = RandomScheduler
+            self.simulator = Simulator(**sim_kwargs)
             
             # Load dataset
             self.simulator.initialize(input_file=self.dataset_path)
@@ -95,31 +104,70 @@ class EdgeEnv(BaseEdgeEnv):
             raise
             
     def _initial_service_placement(self):
-        """Perform initial placement of services on servers."""
+        """Perform initial placement of services on servers.
+        
+        If randomize_initial_placement is True (default), services will be placed in a randomized order and
+        candidate servers will be checked in a randomized order (capacity-respecting). Otherwise, a simple
+        deterministic round-robin is used.
+        """
         try:
             servers = EdgeServer.all()
             services = Service.all()
             
             if not servers or not services:
                 return
+            
+            if self.randomize_initial_placement:
+                # Randomize service order and server order for placement attempts
+                try:
+                    service_indices = np.arange(len(services))
+                    np.random.shuffle(service_indices)
+                    server_indices = np.arange(len(servers))
+                    np.random.shuffle(server_indices)
+                except Exception:
+                    # Fallback in case numpy RNG fails for any reason
+                    service_indices = list(range(len(services)))
+                    server_indices = list(range(len(servers)))
                 
-            # Simple round-robin initial placement
-            server_idx = 0
-            for service in services:
-                if service.server is None:
-                    # Try to find a server with capacity
-                    placed = False
-                    attempts = 0
-                    while not placed and attempts < len(servers):
-                        server = servers[server_idx % len(servers)]
-                        if server.has_capacity_to_host(service):
-                            try:
-                                service.provision(target_server=server)
-                                placed = True
-                            except:
-                                pass
-                        server_idx += 1
-                        attempts += 1
+                for si in service_indices:
+                    service = services[si]
+                    if service.server is None:
+                        placed = False
+                        for sj in server_indices:
+                            server = servers[int(sj)]
+                            if server.has_capacity_to_host(service):
+                                try:
+                                    service.provision(target_server=server)
+                                    placed = True
+                                    break
+                                except Exception:
+                                    continue
+                        # Optional: rotate server order a bit to avoid bias
+                        try:
+                            if len(server_indices) > 1:
+                                # move first index to the end
+                                first = server_indices[0]
+                                server_indices = np.append(server_indices[1:], first)
+                        except Exception:
+                            pass
+            else:
+                # Simple round-robin initial placement (deterministic)
+                server_idx = 0
+                for service in services:
+                    if service.server is None:
+                        # Try to find a server with capacity
+                        placed = False
+                        attempts = 0
+                        while not placed and attempts < len(servers):
+                            server = servers[server_idx % len(servers)]
+                            if server.has_capacity_to_host(service):
+                                try:
+                                    service.provision(target_server=server)
+                                    placed = True
+                                except Exception:
+                                    pass
+                            server_idx += 1
+                            attempts += 1
                         
         except Exception as e:
             # Silent fail - initial placement is optional
