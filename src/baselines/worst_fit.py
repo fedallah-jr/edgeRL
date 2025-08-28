@@ -68,9 +68,9 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
     """Evaluate the Worst-Fit baseline on EdgeEnv and save metrics to disk.
 
     Creates logs under {log_root}/eval_baseline/{timestamp}/ with:
-    - eval_summary.csv: per-episode rewards
-    - summary.txt: mean/std rewards and episode count
     - steps/episode_<n>_steps.csv: per-step metrics (info keys + reward)
+    - eval_summary.csv: per-episode reward plus migrations, valid actions, unique actions, total latency
+    - summary.txt: mean/std rewards, totals and means for the extra metrics
     """
     # Lazy import to avoid circulars
     env = env_class(env_config)
@@ -81,12 +81,6 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
     eval_root = os.path.join(abs_log_root, 'eval_baseline', ts)
     steps_dir = os.path.join(eval_root, 'steps')
     os.makedirs(steps_dir, exist_ok=True)
-
-    # Prepare summary CSV
-    summary_csv = os.path.join(eval_root, 'eval_summary.csv')
-    with open(summary_csv, mode='w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["episode", "reward"])  # episode return
 
     episode_returns = []
 
@@ -127,23 +121,33 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
             for it in infos:
                 writer.writerow([it.get(k, "") for k in keys])
 
-        # Append to summary
-        with open(summary_csv, mode='a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([ep + 1, ep_return])
-
         print(f"Baseline (Worst-Fit) Episode {ep + 1}: Reward = {ep_return:.4f}")
         episode_returns.append(ep_return)
 
-    # Save summary stats
+    # Save enhanced summary files using shared utilities
     mean_reward = float(np.mean(episode_returns)) if episode_returns else 0.0
     std_reward = float(np.std(episode_returns)) if episode_returns else 0.0
 
-    summary_txt = os.path.join(eval_root, 'summary.txt')
-    with open(summary_txt, 'w') as f:
-        f.write(f"Mean Reward: {mean_reward:.6f}\n")
-        f.write(f"Std Reward: {std_reward:.6f}\n")
-        f.write(f"Episodes: {len(episode_returns)}\n")
+    try:
+        from src.utils.eval_utils import summarize_steps_dir, write_summary_files
+        per_ep_metrics, aggregates = summarize_steps_dir(steps_dir)
+        write_summary_files(eval_root, per_ep_metrics, episode_returns)
+    except Exception:
+        # As a fallback, write minimal summary.txt if utils are unavailable
+        summary_txt = os.path.join(eval_root, 'summary.txt')
+        with open(summary_txt, 'w') as f:
+            f.write(f"Mean Reward: {mean_reward:.6f}\n")
+            f.write(f"Std Reward: {std_reward:.6f}\n")
+            f.write(f"Episodes: {len(episode_returns)}\n")
+        aggregates = {
+            'episodes': float(len(episode_returns)),
+            'total_migrations': 0.0,
+            'mean_migrations': 0.0,
+            'total_valid_actions': 0.0,
+            'mean_valid_actions': 0.0,
+            'total_latency': 0.0,
+            'mean_latency': 0.0,
+        }
 
     # Close the env
     try:
@@ -156,5 +160,6 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
         'std_reward': std_reward,
         'episodes': episode_returns,
         'eval_dir': eval_root,
+        'aggregates': aggregates,
     }
 
