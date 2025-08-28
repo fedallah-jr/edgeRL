@@ -82,7 +82,16 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
     steps_dir = os.path.join(eval_root, 'steps')
     os.makedirs(steps_dir, exist_ok=True)
 
+    # Summary CSV for per-episode aggregates
+    summary_csv = os.path.join(eval_root, 'eval_summary.csv')
+    with open(summary_csv, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["episode", "reward", "mean_power", "mean_latency", "unique_actions"])
+
     episode_returns = []
+    episode_mean_powers = []
+    episode_mean_latencies = []
+    episode_unique_actions = []
 
     for ep in range(num_episodes):
         obs, info = env.reset()
@@ -93,19 +102,40 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
         # Collect step infos for CSV; include reward per step
         infos = []
         step_idx = 0
+        action_set = set()
+        powers = []
+        latencies = []
 
         while not done and not truncated:
             action = policy.select_action(env)
             obs, reward, done, truncated, step_info = env.step(action)
             ep_return += float(reward)
+            action_set.add(int(action))
 
-            # Merge reward into info for logging
+            # Merge reward and action into info for logging
             if isinstance(step_info, dict):
                 row = dict(step_info)
                 row['reward'] = float(reward)
             else:
                 row = {'reward': float(reward)}
+            row['action'] = int(action)
             row['step_index'] = step_idx
+
+            # Track power and latency if present
+            if isinstance(step_info, dict):
+                if 'total_power' in step_info and step_info['total_power'] is not None:
+                    try:
+                        powers.append(float(step_info['total_power']))
+                    except Exception:
+                        pass
+                for k in ('mean_latency', 'avg_latency', 'latency', 'total_latency'):
+                    if k in step_info and step_info[k] is not None:
+                        try:
+                            latencies.append(float(step_info[k]))
+                        except Exception:
+                            pass
+                        break
+
             infos.append(row)
             step_idx += 1
 
@@ -121,12 +151,27 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
             for it in infos:
                 writer.writerow([it.get(k, "") for k in keys])
 
-        print(f"Baseline (Worst-Fit) Episode {ep + 1}: Reward = {ep_return:.4f}")
+        mean_power = float(np.mean(powers)) if powers else 0.0
+        mean_latency = float(np.mean(latencies)) if latencies else 0.0
+        unique_actions = int(len(action_set))
+
+        print(f"Baseline (Worst-Fit) Episode {ep + 1}: Reward = {ep_return:.4f}, MeanPower = {mean_power:.4f}, MeanLatency = {mean_latency:.4f}, UniqueActions = {unique_actions}")
         episode_returns.append(ep_return)
+        episode_mean_powers.append(mean_power)
+        episode_mean_latencies.append(mean_latency)
+        episode_unique_actions.append(unique_actions)
+
+        # Append row to summary CSV
+        with open(summary_csv, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([ep + 1, ep_return, mean_power, mean_latency, unique_actions])
 
     # Save enhanced summary files using shared utilities
     mean_reward = float(np.mean(episode_returns)) if episode_returns else 0.0
     std_reward = float(np.std(episode_returns)) if episode_returns else 0.0
+    mean_mean_power = float(np.mean(episode_mean_powers)) if episode_mean_powers else 0.0
+    mean_mean_latency = float(np.mean(episode_mean_latencies)) if episode_mean_latencies else 0.0
+    mean_unique_actions = float(np.mean(episode_unique_actions)) if episode_unique_actions else 0.0
 
     try:
         from src.utils.eval_utils import summarize_steps_dir, write_summary_files
@@ -140,6 +185,9 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
             f.write(f"Mean Reward: {mean_reward:.6f}\n")
             f.write(f"Std Reward: {std_reward:.6f}\n")
             f.write(f"Episodes: {len(episode_returns)}\n")
+            f.write(f"Mean of Mean Powers: {mean_mean_power:.6f}\n")
+            f.write(f"Mean of Mean Latencies: {mean_mean_latency:.6f}\n")
+            f.write(f"Mean of Unique Actions: {mean_unique_actions:.6f}\n")
         aggregates = {
             'episodes': float(len(episode_returns)),
             'total_migrations': 0.0,
@@ -147,7 +195,9 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
             'total_valid_actions': 0.0,
             'mean_valid_actions': 0.0,
             'total_latency': 0.0,
-            'mean_latency': 0.0,
+            'mean_latency': mean_mean_latency,
+            'mean_power': mean_mean_power,
+            'mean_unique_actions': mean_unique_actions,
         }
 
     # Close the env

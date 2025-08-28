@@ -360,20 +360,16 @@ class RLTrainer:
         summary_csv = os.path.join(eval_root, 'eval_summary.csv')
         with open(summary_csv, mode='w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(["episode", "reward"])
+            writer.writerow(["episode", "reward", "mean_power", "mean_latency", "unique_actions"])
         
         print(f"\nEvaluating for {num_episodes} episodes...")
         print(f"Evaluation logs will be saved under: {eval_root}")
         
         results = []
         
-        # Preferred: Use RLlib evaluate() once if available; otherwise, fall back to manual episodes
-        used_rllib_eval = False
+        # Preferred: Use RLlib evaluate() once for quick feedback (optional)
         try:
-            # Attempt to configure evaluation duration dynamically (best-effort)
-            # Note: Not all RLlib versions expose this, so we just call evaluate() once.
             eval_result = self.trainer.evaluate()
-            # Many RLlib builds summarize over internal episodes; we still produce num_episodes rows
             mean_val = self._first_non_none(
                 eval_result.get("evaluation", {}) if isinstance(eval_result, dict) else {},
                 [
@@ -385,139 +381,132 @@ class RLTrainer:
                 default=None,
             )
             if mean_val is not None:
-                # Emit a single line using RLlib's evaluation result
-                results = [mean_val] * num_episodes
-                for i in range(num_episodes):
-                    print(f"  Episode {i + 1}: Reward = {mean_val:.2f}")
-                    with open(summary_csv, mode='a', newline='') as f:
-                        writer = csv.writer(f)
-                        writer.writerow([i + 1, mean_val])
-                used_rllib_eval = True
+                print(f"RLlib evaluation reported mean reward: {mean_val:.2f}")
         except Exception as e:
-            print(f"RLlib evaluate() not available or failed: {e}. Falling back to manual evaluation.")
+            print(f"RLlib evaluate() not available or failed: {e}. Proceeding with manual evaluation.")
+
+        # Manual evaluation loop using a local env and the trained Algorithm for inference
+        try:
+            from ..envs.edge_env import EdgeEnv
+            env = EdgeEnv(self.env_config)
+        except Exception as e:
+            print(f"Failed to construct evaluation environment: {e}")
+            env = None
         
-        if not used_rllib_eval:
-            # Manual evaluation loop using a local env and the trained Algorithm for inference
+        for episode in range(num_episodes):
+            ep_reward = 0.0
+            action_set = set()
+            powers = []
+            latencies = []
             try:
-                from ..envs.edge_env import EdgeEnv
-                env = EdgeEnv(self.env_config)
-            except Exception as e:
-                print(f"Failed to construct evaluation environment: {e}")
-                env = None
-            
-            for episode in range(num_episodes):
-                ep_reward = 0.0
-                try:
-                    if env is None:
-                        raise RuntimeError("No evaluation environment available")
-                    obs, info = env.reset()
-                    terminated = False
-                    truncated = False
-                    step_idx = 0
-                    while not (terminated or truncated):
-                        # Use RLlib's (still available) convenience API for single-action inference.
+                if env is None:
+                    raise RuntimeError("No evaluation environment available")
+                obs, info = env.reset()
+                terminated = False
+                truncated = False
+                step_idx = 0
+                while not (terminated or truncated):
+                    # Compute action with robust fallbacks across RLlib APIs
+                    try:
+                        action = self.trainer.compute_single_action(obs, explore=False)
+                    except Exception:
                         try:
-                            # Preferred (even if deprecated): still widely supported
-                            action = self.trainer.compute_single_action(obs, explore=False)
-                        except Exception as e1:
-                            # Next: try batched API
+                            acts = self.trainer.compute_actions([obs], explore=False)
+                            action = acts[0][0] if isinstance(acts, tuple) else acts[0]
+                        except Exception:
+                            # RLModule-based inference (new API)
+                            import numpy as _np
+                            import torch as _torch
+                            module = None
                             try:
-                                acts = self.trainer.compute_actions([obs], explore=False)
-                                # Some versions return (actions, state_outs, info)
-                                if isinstance(acts, tuple):
-                                    action = acts[0][0]
-                                else:
-                                    action = acts[0]
+                                module = self.trainer.get_module()
                             except Exception:
-                                # Last resort: Use RLModule directly (new API)
-                                try:
-                                    import numpy as _np
-                                    import torch as _torch
-                                    module = None
-                                    # Try get default module first
+                                pass
+                            if module is None:
+                                for mid in ("default_module", "default_policy", "policy_0"):
                                     try:
-                                        module = self.trainer.get_module()
+                                        module = self.trainer.get_module(mid)
+                                        if module is not None:
+                                            break
+                                    except Exception:
+                                        continue
+                            if module is None:
+                                it = getattr(self.trainer, "iter_modules", None)
+                                if callable(it):
+                                    try:
+                                        first = next(it())
+                                        module = first[1] if isinstance(first, (list, tuple)) and len(first) >= 2 else first
                                     except Exception:
                                         pass
-                                    if module is None:
-                                        # Try common module IDs
-                                        for mid in ("default_module", "default_policy", "policy_0"):
-                                            try:
-                                                module = self.trainer.get_module(mid)
-                                                if module is not None:
-                                                    break
-                                            except Exception:
-                                                continue
-                                    if module is None:
-                                        # Try iter_modules() iterator
-                                        it = getattr(self.trainer, "iter_modules", None)
-                                        if callable(it):
-                                            try:
-                                                first = next(it())
-                                                # Could be (module_id, module) or just module
-                                                module = first[1] if isinstance(first, (list, tuple)) and len(first) >= 2 else first
-                                            except Exception:
-                                                pass
-                                    if module is None:
-                                        raise RuntimeError("No RLModule available for inference")
+                            if module is None:
+                                raise RuntimeError("No RLModule available for inference")
+                            obs_np = _np.asarray(obs, dtype=_np.float32)
+                            obs_tensor = _torch.from_numpy(obs_np).unsqueeze(0)
+                            outputs = module.forward_inference({"obs": obs_tensor})
+                            # Extract action from outputs
+                            if isinstance(outputs, dict):
+                                if "actions" in outputs:
+                                    act_tensor = outputs["actions"]
+                                    act_np = act_tensor.detach().cpu().numpy() if hasattr(act_tensor, "detach") else _np.array(act_tensor)
+                                    action = int(act_np[0]) if act_np.ndim > 0 else int(act_np)
+                                elif "action_dist_inputs" in outputs:
+                                    logits = outputs["action_dist_inputs"]
+                                    logits = logits.detach().cpu().numpy() if hasattr(logits, "detach") else logits
+                                    action = int(_np.argmax(logits, axis=-1).item() if getattr(logits, "ndim", 0) > 1 else _np.argmax(logits))
+                                else:
+                                    first_val = next(iter(outputs.values())) if outputs else None
+                                    if first_val is None:
+                                        raise RuntimeError("RLModule produced no usable outputs")
+                                    first_val = first_val.detach().cpu().numpy() if hasattr(first_val, "detach") else first_val
+                                    action = int(_np.argmax(first_val, axis=-1).item() if getattr(first_val, "ndim", 0) > 1 else _np.argmax(first_val))
+                            else:
+                                out = outputs
+                                out = out.detach().cpu().numpy() if hasattr(out, "detach") else out
+                                action = int(_np.argmax(out, axis=-1).item() if getattr(out, "ndim", 0) > 1 else _np.argmax(out))
 
-                                    obs_np = _np.asarray(obs, dtype=_np.float32)
-                                    obs_tensor = _torch.from_numpy(obs_np).unsqueeze(0)
-                                    outputs = module.forward_inference({"obs": obs_tensor})
-                                    # Try multiple keys to extract an action
-                                    if isinstance(outputs, dict):
-                                        if "actions" in outputs:
-                                            act_tensor = outputs["actions"]
-                                            if hasattr(act_tensor, "detach"):
-                                                act_np = act_tensor.detach().cpu().numpy()
-                                            else:
-                                                act_np = _np.array(act_tensor)
-                                            action = int(act_np[0]) if act_np.ndim > 0 else int(act_np)
-                                        elif "action_dist_inputs" in outputs:
-                                            logits = outputs["action_dist_inputs"]
-                                            if hasattr(logits, "detach"):
-                                                logits = logits.detach().cpu().numpy()
-                                            action = int(_np.argmax(logits, axis=-1).item() if logits.ndim > 1 else _np.argmax(logits))
-                                        else:
-                                            # Fallback: grab first tensor-like
-                                            first_val = None
-                                            for v in outputs.values():
-                                                first_val = v
-                                                break
-                                            if first_val is None:
-                                                raise RuntimeError("RLModule produced no usable outputs")
-                                            if hasattr(first_val, "detach"):
-                                                first_val = first_val.detach().cpu().numpy()
-                                            action = int(_np.argmax(first_val, axis=-1).item() if getattr(first_val, "ndim", 0) > 1 else _np.argmax(first_val))
-                                    else:
-                                        # outputs is likely a tensor
-                                        out = outputs
-                                        if hasattr(out, "detach"):
-                                            out = out.detach().cpu().numpy()
-                                        action = int(_np.argmax(out, axis=-1).item() if getattr(out, "ndim", 0) > 1 else _np.argmax(out))
-                                except Exception as ee:
-                                    raise RuntimeError(f"Cannot compute action: {ee}")
-                        obs, reward, terminated, truncated, step_info = env.step(action)
-                        ep_reward += float(reward)
-                        step_idx += 1
-                    print(f"  Episode {episode + 1}: Reward = {ep_reward:.2f}")
-                    results.append(ep_reward)
-                    with open(summary_csv, mode='a', newline='') as f:
-                        writer = csv.writer(f)
-                        writer.writerow([episode + 1, ep_reward])
-                except Exception as e:
-                    print(f"  Episode {episode + 1}: Error - {e}")
-                    results.append(0.0)
-                    with open(summary_csv, mode='a', newline='') as f:
-                        writer = csv.writer(f)
-                        writer.writerow([episode + 1, 0.0])
-            
-            # Ensure env is closed
-            try:
-                if env is not None:
-                    env.close()
-            except Exception:
-                pass
+                    obs, reward, terminated, truncated, step_info = env.step(action)
+                    ep_reward += float(reward)
+
+                    # Track metrics
+                    action_set.add(int(action) if isinstance(action, (int, np.integer)) else int(action))
+                    if isinstance(step_info, dict):
+                        if 'total_power' in step_info and step_info['total_power'] is not None:
+                            try:
+                                powers.append(float(step_info['total_power']))
+                            except Exception:
+                                pass
+                        # Try to extract any latency measure
+                        for k in ('mean_latency', 'avg_latency', 'latency', 'total_latency'):
+                            if k in step_info and step_info[k] is not None:
+                                try:
+                                    latencies.append(float(step_info[k]))
+                                except Exception:
+                                    pass
+                                break
+
+                    step_idx += 1
+                # Episode done: write row with aggregates
+                mean_power = float(np.mean(powers)) if powers else 0.0
+                mean_latency = float(np.mean(latencies)) if latencies else 0.0
+                unique_actions = int(len(action_set))
+                print(f"  Episode {episode + 1}: Reward = {ep_reward:.2f}, MeanPower = {mean_power:.2f}, MeanLatency = {mean_latency:.2f}, UniqueActions = {unique_actions}")
+                results.append(ep_reward)
+                with open(summary_csv, mode='a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([episode + 1, ep_reward, mean_power, mean_latency, unique_actions])
+            except Exception as e:
+                print(f"  Episode {episode + 1}: Error - {e}")
+                results.append(0.0)
+                with open(summary_csv, mode='a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([episode + 1, 0.0, 0.0, 0.0, 0])
+        
+        # Ensure env is closed
+        try:
+            if env is not None:
+                env.close()
+        except Exception:
+            pass
         
         # Disable step logging
         EdgeSimCallbacks.SAVE_EVAL_METRICS = False
