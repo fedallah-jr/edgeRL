@@ -1,0 +1,127 @@
+[33mcommit b940356faf92f1fe7203e69bf1c7f6c132c089c0[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Thu Aug 28 19:03:31 2025 +0200
+
+    logging
+
+[33mcommit 2e2b0862ce813a4d1b14334d02705c08262c4942[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Thu Aug 28 18:53:28 2025 +0200
+
+    Update worst_fit.py
+
+[33mcommit cea9cca78199bb924ebd0c571932d147959e6b4f[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Thu Aug 28 18:47:08 2025 +0200
+
+    fixes
+    
+    fixes to evaluation script
+
+[33mcommit 35550cc907a09646a4e049b2b0b706a30b60cdfe[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Thu Aug 28 17:38:52 2025 +0200
+
+    add evaluation scripts
+
+[33mcommit 49b71a4ee5f6d489784dc0758603087f5a91ec32[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Thu Aug 28 17:07:05 2025 +0200
+
+    remove old ifles
+
+[33mcommit c56aa02308f74d56fd145594fb4dbd4b354ef99a[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Thu Aug 28 15:52:24 2025 +0200
+
+    fixes
+
+[33mcommit 58bf639d9b9a4b3f67ac19af50626cd8b33600a2[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Thu Aug 28 15:35:15 2025 +0200
+
+    fixes
+
+[33mcommit bc1ecc2c4640ed1d8074efd787ef4784e8ee9505[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Thu Aug 28 14:36:38 2025 +0200
+
+    fixes
+
+[33mcommit 54ba9b1e2760e97088a817424688a846222e1873[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Thu Aug 28 13:50:15 2025 +0200
+
+    .
+
+[33mcommit 80ae06996327b126eca456854fbf1e1bc0c99dae[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 23:13:36 2025 +0200
+
+    .
+
+[33mcommit f8132ae69d3f020e64029d41fd39db1186a5eb40[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 23:09:08 2025 +0200
+
+    Update trainer.py
+
+[33mcommit a7c5e7751b032f11a7b124d9df86ef0d17b38548[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 23:06:23 2025 +0200
+
+    Update trainer.py
+
+[33mcommit ae195860c591199145d1aef24984f91e16f3c03d[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 23:02:33 2025 +0200
+
+    Update trainer.py
+
+[33mcommit 81427b71257e62ba074d7f88207f82ee9afe50aa[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 23:00:01 2025 +0200
+
+    Update trainer.py
+
+[33mcommit a443d47f5e4fb36d857afc491ba34a4b61b06dca[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 22:57:17 2025 +0200
+
+    Update trainer.py
+
+[33mcommit 25b6013a6bff1d1a181df46348724286123890f6[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 22:55:39 2025 +0200
+
+    Update trainer.py
+
+[33mcommit 58008e04f7486c1426c8b821bb0568d327795e2c[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 22:52:12 2025 +0200
+
+    Update trainer.py
+
+[33mcommit e22d21bae40b2df1c5abe1588d6e8f3b6803cc8b[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 22:42:05 2025 +0200
+
+    .
+
+[33mcommit e4459c32293d009eb7e93002c5c494d49fa22c6a[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 22:36:16 2025 +0200
+
+    fixes
+
+[33mcommit 851abd41de3ac805620c1134ff37deeb4d2837e9[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 22:18:15 2025 +0200
+
+    fixes
+
+[33mcommit e1743b8123b46d4f306ca6ba908261b737e6ac39[m
+Author: fedallah-jr <kilciali2728@gmail.com>
+Date:   Wed Aug 27 21:33:53 2025 +0200
+
+    Initial commit
