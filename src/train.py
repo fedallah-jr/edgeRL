@@ -133,6 +133,11 @@ def main():
     
     # Load configuration
     config = load_config(args.config)
+    # Convert dataset path to absolute path
+    if 'env' in config and 'dataset_path' in config['env']:
+        dataset_path = Path(config['env']['dataset_path'])
+        if not dataset_path.is_absolute():
+            config['env']['dataset_path'] = str(Path.cwd() / dataset_path)
     
     # Override config with command line arguments
     if args.num_episodes is not None:
