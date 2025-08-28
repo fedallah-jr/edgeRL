@@ -8,8 +8,8 @@ from edge_sim_py.components.edge_server import EdgeServer
 class PowerReward:
     """Reward calculator based on power consumption.
     
-    Supports different modes. By default, aligns with EdgeAISIM by using
-    the sum of inverse server power as reward.
+    This class implements reward calculation focused on minimizing
+    total power consumption across edge servers.
     """
     
     def __init__(self, config: Dict[str, Any]):
@@ -19,12 +19,9 @@ class PowerReward:
             config: Reward configuration dictionary
         """
         self.config = config
-        # Modes: "inverse_sum" (EdgeAISIM default), "diff_total_power" (original behavior)
-        self.mode = config.get("mode", "inverse_sum")
         self.weight = config.get("power_weight", 1.0)
-        self.normalize = config.get("normalize", False if self.mode == "inverse_sum" else True)
+        self.normalize = config.get("normalize", True)
         self.penalty_invalid = config.get("penalty_invalid_action", -10.0)
-        self.epsilon = float(config.get("epsilon", 1e-6))
         
         # Track previous power consumption for difference reward
         self.previous_power = None
@@ -49,45 +46,41 @@ class PowerReward:
         if not info.get('valid_action', True):
             return self.penalty_invalid
         
-        # Compute per-server powers
-        powers = [server.get_power_consumption() for server in EdgeServer.all()]
-        total_power = float(sum(powers))
+        # Calculate current total power consumption
+        current_power = self._calculate_total_power()
         
-        # Debug prints
+        # Debug: print power consumption
         if self.config.get('debug', False):
-            if self.mode == "inverse_sum":
-                inv_sum = sum(1.0 / max(p, self.epsilon) for p in powers)
-                print(f"Total power: {total_power}, Inverse-sum reward (pre-weight): {inv_sum}")
-            else:
-                print(f"Current power: {total_power}, Previous: {self.previous_power}")
+            print(f"Current power: {current_power}, Previous: {self.previous_power}")
         
-        if self.mode == "inverse_sum":
-            # EdgeAISIM-style reward: sum of inverse server powers
-            reward = sum(1.0 / max(p, self.epsilon) for p in powers) * self.weight
-            # Optional normalization (off by default)
-            if self.normalize and len(powers) > 0:
-                reward = reward / len(powers)
-            return float(reward)
-        
-        # Original behavior: difference in total power across steps (minimize)
-        current_power = total_power
+        # Base reward: negative power consumption (minimize)
         reward = -current_power * self.weight
         
+        # If we have previous power, use difference as reward
         if self.previous_power is not None:
             power_diff = current_power - self.previous_power
-            reward = -power_diff * self.weight
+            reward = -power_diff * self.weight  # Negative because we want to minimize
+            
+            # Bonus for reducing power
             if power_diff < 0:
-                reward += abs(power_diff) * 0.5
+                reward += abs(power_diff) * 0.5  # Extra reward for improvement
         
+        # Update previous power
         self.previous_power = current_power
         
+        # Normalize reward if configured
         if self.normalize:
+            # Normalize to roughly [-1, 1] range
+            # Assuming max power change is around 100W
             reward = np.clip(reward / 100.0, -1.0, 1.0)
         
+        # Add small bonus for successful migration
         if info.get('migration', False):
             reward += 0.1
         
+        # Provide a small non-zero reward even if power is zero
         if abs(reward) < 0.001:
+            # Give small negative reward to encourage exploration
             reward = -0.01
         
         return float(reward)
