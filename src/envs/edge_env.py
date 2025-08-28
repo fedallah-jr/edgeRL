@@ -328,7 +328,8 @@ class EdgeEnv(BaseEdgeEnv):
                                 # Avoid migrating back to the same server; treat as no-op for both env and pattern
                                 if service.server is not None and target_server == service.server:
                                     info['migration'] = False
-                                    info['valid_action'] = Truen                                    pattern_choice = -1
+                                    info['valid_action'] = True
+                                    pattern_choice = -1
                                 elif target_server.has_capacity_to_host(service):
                                     service.provision(target_server=target_server)
                                     info['migration'] = True
