@@ -102,27 +102,32 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
         # Collect step infos for CSV; include reward per step
         infos = []
         step_idx = 0
-        action_set = set()
         powers = []
         latencies = []
+
+        # Prepare pattern tracking
+        try:
+            from edge_sim_py.components import Service as _Service
+            service_ids_sorted = sorted([s.id for s in _Service.all()])
+        except Exception:
+            service_ids_sorted = []
+        id_to_pos = {sid: i for i, sid in enumerate(service_ids_sorted)}
+        current_pattern = [-1] * len(service_ids_sorted)
+        unique_patterns = set()
 
         while not done and not truncated:
             action = policy.select_action(env)
             obs, reward, done, truncated, step_info = env.step(action)
             ep_return += float(reward)
-            action_set.add(int(action))
 
             # Merge reward and action into info for logging
             if isinstance(step_info, dict):
                 row = dict(step_info)
                 row['reward'] = float(reward)
-            else:
-                row = {'reward': float(reward)}
-            row['action'] = int(action)
-            row['step_index'] = step_idx
+                row['action'] = int(action)
+                row['step_index'] = step_idx
 
-            # Track power and latency if present
-            if isinstance(step_info, dict):
+                # Track power and latency if present
                 if 'total_power' in step_info and step_info['total_power'] is not None:
                     try:
                         powers.append(float(step_info['total_power']))
@@ -136,8 +141,25 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
                             pass
                         break
 
-            infos.append(row)
-            step_idx += 1
+                # Build pattern vector using service_id/pattern_choice when available
+                try:
+                    sid = step_info.get('service_id', None)
+                    pch = step_info.get('pattern_choice', None)
+                    if sid is not None and sid in id_to_pos and pch is not None:
+                        current_pattern[id_to_pos[sid]] = int(pch)
+                except Exception:
+                    pass
+
+                # Finalize pattern at the end of a scheduling round
+                try:
+                    if int(step_info.get('services_to_migrate', 0)) == 0 and len(current_pattern) > 0:
+                        unique_patterns.add(tuple(current_pattern))
+                        current_pattern = [-1] * len(service_ids_sorted)
+                except Exception:
+                    pass
+
+                infos.append(row)
+                step_idx += 1
 
         # Write per-episode steps CSV
         keys = set()
@@ -153,7 +175,7 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
 
         mean_power = float(np.mean(powers)) if powers else 0.0
         mean_latency = float(np.mean(latencies)) if latencies else 0.0
-        unique_actions = int(len(action_set))
+        unique_actions = int(len(unique_patterns))
 
         print(f"Baseline (Worst-Fit) Episode {ep + 1}: Reward = {ep_return:.4f}, MeanPower = {mean_power:.4f}, MeanLatency = {mean_latency:.4f}, UniqueActions = {unique_actions}")
         episode_returns.append(ep_return)

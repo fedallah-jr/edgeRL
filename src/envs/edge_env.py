@@ -311,8 +311,11 @@ class EdgeEnv(BaseEdgeEnv):
             state_before = self.get_state()
             
             # Check if we have services to process
+            decided_service_id = None
+            pattern_choice = -1  # -1 means no migration for pattern accounting
             if self.current_service_idx < len(self.services_to_migrate):
                 service = self.services_to_migrate[self.current_service_idx]
+                decided_service_id = getattr(service, 'id', None)
                 
                 # Execute action (migration)
                 if self.is_valid_action(action):
@@ -322,26 +325,32 @@ class EdgeEnv(BaseEdgeEnv):
                         if servers and action < len(servers):
                             target_server = servers[action]
                             try:
-                                # Avoid migrating back to the same server; treat as no-op
+                                # Avoid migrating back to the same server; treat as no-op for both env and pattern
                                 if service.server is not None and target_server == service.server:
                                     info['migration'] = False
-                                    info['valid_action'] = True
+                                    info['valid_action'] = Truen                                    pattern_choice = -1
                                 elif target_server.has_capacity_to_host(service):
                                     service.provision(target_server=target_server)
                                     info['migration'] = True
                                     info['valid_action'] = True
+                                    pattern_choice = int(action)
                                 else:
                                     info['valid_action'] = False
+                                    pattern_choice = -1
                             except:
                                 info['valid_action'] = False
+                                pattern_choice = -1
                         else:
                             info['valid_action'] = False
+                            pattern_choice = -1
                     else:
                         # No migration action
                         info['migration'] = False
                         info['valid_action'] = True
+                        pattern_choice = -1
                 else:
                     info['valid_action'] = False
+                    pattern_choice = -1
                 
                 self.current_service_idx += 1
             
@@ -359,6 +368,12 @@ class EdgeEnv(BaseEdgeEnv):
             
             # Get new state
             state_after = self.get_state()
+            
+            # Add decision identifiers to info for evaluation pattern accounting
+            if decided_service_id is not None:
+                info['service_id'] = decided_service_id
+                info['pattern_choice'] = pattern_choice
+                info['no_migration_action'] = True if pattern_choice == -1 else False
             
             # Calculate reward
             reward = self.reward_calculator.calculate(
@@ -520,11 +535,33 @@ class EdgeEnv(BaseEdgeEnv):
             total_power = sum(server.get_power_consumption() for server in servers)
             num_migrations = len([s for s in services if s.being_provisioned])
             
+            # Compute mean latency across users/applications if available
+            mean_latency = 0.0
+            total_latency = 0.0
+            try:
+                latencies = []
+                for user in User.all():
+                    # user.delays maps app.id (as str) -> delay
+                    for app in getattr(user, 'applications', []) or []:
+                        try:
+                            d = user.delays.get(str(app.id), None)
+                            if d is not None and not (isinstance(d, float) and (np.isinf(d) or np.isnan(d))):
+                                latencies.append(float(d))
+                        except Exception:
+                            continue
+                if latencies:
+                    mean_latency = float(np.mean(latencies))
+                    total_latency = float(np.sum(latencies))
+            except Exception:
+                pass
+            
             info = {
                 'total_power': total_power,
                 'num_migrations': num_migrations,
                 'current_step': self.current_step,
-                'services_to_migrate': len(self.services_to_migrate)
+                'services_to_migrate': len(self.services_to_migrate),
+                'mean_latency': mean_latency,
+                'total_latency': total_latency,
             }
             
             return info
@@ -534,7 +571,9 @@ class EdgeEnv(BaseEdgeEnv):
                 'total_power': 0,
                 'num_migrations': 0,
                 'current_step': self.current_step,
-                'services_to_migrate': 0
+                'services_to_migrate': 0,
+                'mean_latency': 0.0,
+                'total_latency': 0.0,
             }
 
     def get_current_service(self):

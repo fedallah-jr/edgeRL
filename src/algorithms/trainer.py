@@ -395,13 +395,25 @@ class RLTrainer:
         
         for episode in range(num_episodes):
             ep_reward = 0.0
-            action_set = set()
             powers = []
             latencies = []
+            # Per-episode step log buffer
+            infos = []
             try:
                 if env is None:
                     raise RuntimeError("No evaluation environment available")
                 obs, info = env.reset()
+
+                # Build stable service-id ordering for pattern vectors
+                try:
+                    from edge_sim_py.components import Service as _Service
+                    service_ids_sorted = sorted([s.id for s in _Service.all()])
+                except Exception:
+                    service_ids_sorted = []
+                id_to_pos = {sid: i for i, sid in enumerate(service_ids_sorted)}
+                current_pattern = [-1] * len(service_ids_sorted)
+                unique_patterns = set()
+
                 terminated = False
                 truncated = False
                 step_idx = 0
@@ -467,9 +479,15 @@ class RLTrainer:
                     obs, reward, terminated, truncated, step_info = env.step(action)
                     ep_reward += float(reward)
 
-                    # Track metrics
-                    action_set.add(int(action) if isinstance(action, (int, np.integer)) else int(action))
+                    # Track power and latency if present
                     if isinstance(step_info, dict):
+                        # record step row
+                        row = dict(step_info)
+                        row['reward'] = float(reward)
+                        row['action'] = int(action) if isinstance(action, (int, np.integer)) else int(action)
+                        row['step_index'] = step_idx
+                        infos.append(row)
+
                         if 'total_power' in step_info and step_info['total_power'] is not None:
                             try:
                                 powers.append(float(step_info['total_power']))
@@ -483,17 +501,47 @@ class RLTrainer:
                                 except Exception:
                                     pass
                                 break
+                        # Build pattern vector using service_id/pattern_choice when available
+                        try:
+                            sid = step_info.get('service_id', None)
+                            pch = step_info.get('pattern_choice', None)
+                            if sid is not None and sid in id_to_pos and pch is not None:
+                                current_pattern[id_to_pos[sid]] = int(pch)
+                        except Exception:
+                            pass
+                        # If this scheduling round has completed, finalize a pattern
+                        try:
+                            if int(step_info.get('services_to_migrate', 0)) == 0 and len(current_pattern) > 0:
+                                unique_patterns.add(tuple(current_pattern))
+                                current_pattern = [-1] * len(service_ids_sorted)
+                        except Exception:
+                            pass
 
                     step_idx += 1
                 # Episode done: write row with aggregates
                 mean_power = float(np.mean(powers)) if powers else 0.0
                 mean_latency = float(np.mean(latencies)) if latencies else 0.0
-                unique_actions = int(len(action_set))
+                unique_actions = int(len(unique_patterns))
                 print(f"  Episode {episode + 1}: Reward = {ep_reward:.2f}, MeanPower = {mean_power:.2f}, MeanLatency = {mean_latency:.2f}, UniqueActions = {unique_actions}")
                 results.append(ep_reward)
                 with open(summary_csv, mode='a', newline='') as f:
                     writer = csv.writer(f)
                     writer.writerow([episode + 1, ep_reward, mean_power, mean_latency, unique_actions])
+                # Write per-episode steps CSV
+                try:
+                    keys = set()
+                    for it in infos:
+                        if isinstance(it, dict):
+                            keys.update(it.keys())
+                    keys = sorted(list(keys))
+                    steps_csv = os.path.join(steps_dir, f"episode_{episode + 1}_steps.csv")
+                    with open(steps_csv, mode='w', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(keys)
+                        for it in infos:
+                            writer.writerow([it.get(k, "") for k in keys])
+                except Exception as e:
+                    print(f"    Warning: failed to write steps CSV for episode {episode + 1}: {e}")
             except Exception as e:
                 print(f"  Episode {episode + 1}: Error - {e}")
                 results.append(0.0)
