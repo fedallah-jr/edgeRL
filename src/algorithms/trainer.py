@@ -179,18 +179,6 @@ class RLTrainer:
             log_level="WARN"
         )
         
-        # Evaluation configuration (use config values if provided)
-        try:
-            eval_cfg = self.config.get('evaluation', {})
-            cfg = cfg.evaluation(
-                evaluation_num_env_runners=eval_cfg.get('num_env_runners', 1),
-                evaluation_duration=eval_cfg.get('eval_episodes', 10),
-                evaluation_duration_unit="episodes",
-            )
-        except Exception:
-            # If RLlib version doesn't support these, skip silently
-            pass
-        
         # Build the Algorithm instance
         try:
             algo = cfg.build_algo()
@@ -237,45 +225,6 @@ class RLTrainer:
             if value is not None:
                 return value
         return default
-
-    def _resolve_checkpoint_path(self, checkpoint_path: str) -> Optional[str]:
-        """Resolve checkpoint path to a valid RLlib checkpoint directory.
-        If a directory like "checkpoints/best" is provided, select the latest
-        subdirectory containing a checkpoint file.
-        """
-        try:
-            if not checkpoint_path:
-                return None
-            path = os.path.abspath(checkpoint_path)
-            if os.path.isfile(path):
-                return path
-            if os.path.isdir(path):
-                candidates = []
-                for root, dirs, files in os.walk(path):
-                    # Only search at most 2 levels deep under the given path
-                    depth = root[len(path):].count(os.sep)
-                    if depth > 2:
-                        continue
-                    if (
-                        "algorithm_state.pkl" in files
-                        or "params.pkl" in files
-                        or "checkpoint.pkl" in files
-                    ):
-                        # Use mtime as ranking signal
-                        try:
-                            if "algorithm_state.pkl" in files:
-                                mtime = os.path.getmtime(os.path.join(root, "algorithm_state.pkl"))
-                            else:
-                                mtime = os.path.getmtime(root)
-                        except Exception:
-                            mtime = 0
-                        candidates.append((mtime, root))
-                if candidates:
-                    candidates.sort(key=lambda x: x[0], reverse=True)
-                    return candidates[0][1]
-            return path
-        except Exception:
-            return checkpoint_path
 
     def train(self):
         """Run training loop."""
@@ -374,20 +323,19 @@ class RLTrainer:
         """Evaluate trained model and save metrics to disk.
         
         Args:
-            checkpoint_path: Path to checkpoint to load (file or directory)
-            num_episodes: Number of evaluation episodes (best-effort)
+            checkpoint_path: Path to checkpoint to load
+            num_episodes: Number of evaluation episodes
             
         Returns:
             Evaluation results
         """
-        # Load checkpoint if provided (resolve directories like checkpoints/best)
+        # Load checkpoint if provided
         if checkpoint_path:
-            resolved = self._resolve_checkpoint_path(checkpoint_path)
             try:
-                self.trainer.restore(resolved)
-                print(f"Loaded checkpoint from: {resolved}")
+                self.trainer.restore(checkpoint_path)
+                print(f"Loaded checkpoint from: {checkpoint_path}")
             except Exception as e:
-                print(f"Error loading checkpoint from '{checkpoint_path}': {e}")
+                print(f"Error loading checkpoint: {e}")
         
         # Prepare evaluation output directory
         log_root = self.training_config.get('log_dir', 'logs/')
@@ -401,96 +349,73 @@ class RLTrainer:
         EdgeSimCallbacks.EVAL_DIR = steps_dir
         EdgeSimCallbacks.EP_COUNTER = 0
 
-        # Try to set evaluation duration dynamically (if supported by RLlib version)
-        try:
-            self.trainer.config = self.trainer.config.evaluation(
-                evaluation_duration=num_episodes,
-                evaluation_duration_unit="episodes",
-            )
-        except Exception:
-            pass
+        # Prepare summary CSV
+        summary_csv = os.path.join(eval_root, 'eval_summary.csv')
+        with open(summary_csv, mode='w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["episode", "reward"])
         
         print(f"\nEvaluating for {num_episodes} episodes...")
         print(f"Evaluation logs will be saved under: {eval_root}")
         
-        # Run a single evaluation call; RLlib manages episodes internally
-        try:
-            result = self.trainer.evaluate()
-            eval_dict = result.get("evaluation", {}) if isinstance(result, dict) else {}
-            
-            # Parse aggregated metrics
-            mean_reward = self._first_non_none(
-                eval_dict,
-                [
-                    ["episode_reward_mean"],
-                    ["episode_return_mean"],
-                    ["env_runners", "episode_reward_mean"],
-                    ["env_runners", "episode_return_mean"],
-                ],
-                default=0.0,
-            )
-            episode_len = self._first_non_none(
-                eval_dict,
-                [
-                    ["episode_len_mean"],
-                    ["episode_length_mean"],
-                    ["env_runners", "episode_len_mean"],
-                    ["env_runners", "episode_length_mean"],
-                ],
-                default=0.0,
-            )
-            
-            # If per-episode rewards are available in hist_stats, capture them
-            hist = eval_dict.get("hist_stats", {}) if isinstance(eval_dict, dict) else {}
-            ep_rewards = None
-            for k in ["episode_reward", "episode_return", "return"]:
-                if isinstance(hist, dict) and k in hist and isinstance(hist[k], (list, tuple)):
-                    ep_rewards = list(hist[k])
-                    break
-            if ep_rewards is None:
-                ep_rewards = []
-            std_reward = float(np.std(ep_rewards)) if ep_rewards else 0.0
+        # Run evaluation
+        results = []
+        for episode in range(num_episodes):
+            try:
+                result = self.trainer.evaluate()
+                eval_dict = result.get("evaluation", {}) if isinstance(result, dict) else {}
+                episode_reward = self._first_non_none(
+                    eval_dict,
+                    [
+                        ["episode_reward_mean"],
+                        ["episode_return_mean"],
+                        ["env_runners", "episode_reward_mean"],
+                        ["env_runners", "episode_return_mean"],
+                    ],
+                    default=0.0,
+                )
+                results.append(episode_reward)
+                print(f"  Episode {episode + 1}: Reward = {episode_reward:.2f}")
 
-            # Summarize step CSVs and write enhanced summary files
-            from src.utils.eval_utils import summarize_steps_dir, write_summary_files
-            per_ep_metrics, aggregates = summarize_steps_dir(steps_dir)
-            write_summary_files(eval_root, per_ep_metrics, ep_rewards)
-            
-            # Disable step logging
-            EdgeSimCallbacks.SAVE_EVAL_METRICS = False
-            EdgeSimCallbacks.EVAL_DIR = None
-            
-            print("Evaluation Results:")
-            print(f"  Mean Reward: {mean_reward:.2f}")
-            print(f"  Std Reward: {std_reward:.2f}")
-            print(f"  Mean Episode Length: {episode_len:.2f}")
-            print(f"  Total Migrations: {aggregates.get('migrations', aggregates.get('total_migrations', 0.0)):.2f}")
-            print(f"  Mean Migrations/Episode: {aggregates.get('mean_migrations', 0.0):.2f}")
-            print(f"  Total Valid Actions: {aggregates.get('valid_actions', aggregates.get('total_valid_actions', 0.0)):.2f}")
-            print(f"  Mean Valid Actions/Episode: {aggregates.get('mean_valid_actions', 0.0):.2f}")
-            print(f"  Total Latency: {aggregates.get('total_latency', 0.0):.2f}")
-            print(f"  Mean Latency/Episode: {aggregates.get('mean_total_latency', aggregates.get('mean_latency', 0.0)):.2f}")
-            
-            return {
-                "mean_reward": float(mean_reward),
-                "std_reward": float(std_reward),
-                "mean_episode_len": float(episode_len),
-                "eval_dir": eval_root,
-                "raw": result,
-                "aggregates": aggregates,
-            }
-        except Exception as e:
-            # Disable step logging on error
-            EdgeSimCallbacks.SAVE_EVAL_METRICS = False
-            EdgeSimCallbacks.EVAL_DIR = None
-            print(f"Evaluation error: {e}")
-            return {
-                "mean_reward": 0.0,
-                "std_reward": 0.0,
-                "mean_episode_len": 0.0,
-                "eval_dir": eval_root,
-                "raw": {},
-            }
+                # Append to summary CSV
+                with open(summary_csv, mode='a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([episode + 1, episode_reward])
+            except Exception as e:
+                print(f"  Episode {episode + 1}: Error - {e}")
+                results.append(0)
+                with open(summary_csv, mode='a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([episode + 1, 0])
+        
+        # Disable step logging
+        EdgeSimCallbacks.SAVE_EVAL_METRICS = False
+        EdgeSimCallbacks.EVAL_DIR = None
+        
+        # Calculate statistics
+        if results:
+            mean_reward = np.mean(results)
+            std_reward = np.std(results)
+        else:
+            mean_reward = 0
+            std_reward = 0
+        
+        print(f"\nEvaluation Results:")
+        print(f"  Mean Reward: {mean_reward:.2f} ± {std_reward:.2f}")
+
+        # Save summary stats
+        summary_txt = os.path.join(eval_root, 'summary.txt')
+        with open(summary_txt, 'w') as f:
+            f.write(f"Mean Reward: {mean_reward:.6f}\n")
+            f.write(f"Std Reward: {std_reward:.6f}\n")
+            f.write(f"Episodes: {len(results)}\n")
+        
+        return {
+            "mean_reward": mean_reward,
+            "std_reward": std_reward,
+            "episodes": results,
+            "eval_dir": eval_root,
+        }
     
     def close(self):
         """Clean up resources."""
