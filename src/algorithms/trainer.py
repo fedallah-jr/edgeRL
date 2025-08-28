@@ -170,6 +170,27 @@ class RLTrainer:
             
             return cfg.build_algo()
     
+    def _get_nested(self, d: dict, path: list):
+        """Safely get a nested value from a dict using a path list."""
+        current = d
+        for key in path:
+            if isinstance(current, dict) and key in current:
+                current = current[key]
+            else:
+                return None
+        return current
+
+    def _first_non_none(self, result: dict, key_paths: list, default=0):
+        """Return the first non-None value found by checking the given key paths.
+        key_paths is a list like [["a"], ["b"], ["c","d"]].
+        Unlike `or`, this preserves valid 0.0 values.
+        """
+        for path in key_paths:
+            value = self._get_nested(result, path)
+            if value is not None:
+                return value
+        return default
+
     def train(self):
         """Run training loop."""
         # Setup directories - use absolute path
@@ -201,19 +222,27 @@ class RLTrainer:
                 else:
                     episode_count += 1
                 
-                # Extract metrics (support both legacy and newer keys)
-                episode_reward = (
-                    result.get("episode_reward_mean")
-                    or result.get("episode_return_mean") 
-                    or result.get("env_runners", {}).get("episode_reward_mean")
-                    or 0
+                # Extract metrics (robust across RLlib API variants; preserves 0.0)
+                episode_reward = self._first_non_none(
+                    result,
+                    [
+                        ["episode_reward_mean"],
+                        ["episode_return_mean"],
+                        ["env_runners", "episode_reward_mean"],
+                        ["env_runners", "episode_return_mean"],
+                    ],
+                    default=0.0,
                 )
                 
-                episode_len = (
-                    result.get("episode_len_mean")
-                    or result.get("episode_length_mean")
-                    or result.get("env_runners", {}).get("episode_len_mean")
-                    or 0
+                episode_len = self._first_non_none(
+                    result,
+                    [
+                        ["episode_len_mean"],
+                        ["episode_length_mean"],
+                        ["env_runners", "episode_len_mean"],
+                        ["env_runners", "episode_length_mean"],
+                    ],
+                    default=0.0,
                 )
                 
                 # Custom metrics
@@ -280,11 +309,16 @@ class RLTrainer:
         for episode in range(num_episodes):
             try:
                 result = self.trainer.evaluate()
-                episode_reward = (
-                    result.get("evaluation", {}).get("episode_reward_mean")
-                    or result.get("evaluation", {}).get("episode_return_mean")
-                    or result.get("evaluation", {}).get("env_runners", {}).get("episode_reward_mean")
-                    or 0
+                eval_dict = result.get("evaluation", {}) if isinstance(result, dict) else {}
+                episode_reward = self._first_non_none(
+                    eval_dict,
+                    [
+                        ["episode_reward_mean"],
+                        ["episode_return_mean"],
+                        ["env_runners", "episode_reward_mean"],
+                        ["env_runners", "episode_return_mean"],
+                    ],
+                    default=0.0,
                 )
                 results.append(episode_reward)
                 print(f"  Episode {episode + 1}: Reward = {episode_reward:.2f}")

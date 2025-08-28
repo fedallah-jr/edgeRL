@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Test script to debug reward calculation."""
 
-import sys
-sys.path.append('src')
+import sys, os
+ROOT = os.path.dirname(os.path.abspath(__file__))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
-from envs.edge_env import EdgeEnv
+from src.envs.edge_env import EdgeEnv
 import numpy as np
 
 # Create environment with debug enabled

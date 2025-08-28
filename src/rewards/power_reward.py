@@ -99,7 +99,7 @@ class PowerReward:
     
     def reset(self):
         """Reset reward calculator state."""
-        self.previous_power = None
+        self.previous_power = self._calculate_total_power()
 
 
 class CompositeReward:
