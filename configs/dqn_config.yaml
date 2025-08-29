@@ -51,5 +51,5 @@ algorithm:
 
 # Override training configuration for DQN
 training:
-  num_episodes: 2000
+  num_episodes: 400
   checkpoint_freq: 200
