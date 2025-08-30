@@ -8,7 +8,7 @@ from edge_sim_py import *
 from edge_sim_py.activation_schedulers.random_scheduler import RandomScheduler
 from .base_env import BaseEdgeEnv
 from ..rewards.power_reward import PowerReward
-from ..rewards.edge_aisim_reward import EdgeAISIMReward
+from ..rewards.latency_reward import LatencyReward
 
 
 class EdgeEnv(BaseEdgeEnv):
@@ -56,15 +56,11 @@ class EdgeEnv(BaseEdgeEnv):
         
         if reward_type == "power":
             self.reward_calculator = PowerReward(reward_config)
-        elif reward_type in ("edgeaisim", "inverse_power", "edge_ai_sim"):
-            # EdgeAISIM-style immediate reward (sum of inverse power across servers)
-            self.reward_calculator = EdgeAISIMReward(reward_config)
+        elif reward_type == "latency":
+            self.reward_calculator = LatencyReward(reward_config)
         else:
-            # Default to EdgeAISIM reward when unknown, then fall back to power reward
-            try:
-                self.reward_calculator = EdgeAISIMReward(reward_config)
-            except Exception:
-                self.reward_calculator = PowerReward(reward_config)
+            # Default to power reward if unknown type
+            self.reward_calculator = PowerReward(reward_config)
         
         # Initialize environment
         self._init_simulator()
@@ -380,18 +376,18 @@ class EdgeEnv(BaseEdgeEnv):
                 info['pattern_choice'] = pattern_choice
                 info['no_migration_action'] = True if pattern_choice == -1 else False
             
-            # Calculate reward
-            reward = self.reward_calculator.calculate(
-                state_before, action, state_after, info
-            )
-            
-            # Add runtime metrics to info for logging/evaluation
+            # Add runtime metrics to info before calculating reward (so rewards can use them)
             try:
                 runtime_info = self.get_info()
                 if isinstance(runtime_info, dict):
                     info.update(runtime_info)
             except:
                 pass
+
+            # Calculate reward
+            reward = self.reward_calculator.calculate(
+                state_before, action, state_after, info
+            )
             
             # Episode termination/truncation
             terminated = False
