@@ -357,6 +357,10 @@ class EdgeEnv(BaseEdgeEnv):
             
             # If we've processed all services (one pass), advance simulation time by one tick
             if self.current_service_idx >= len(self.services_to_migrate) or not self.services_to_migrate:
+                # Treat lack of services as a valid no-op decision to avoid invalid-action penalties
+                info['valid_action'] = True
+                info['migration'] = False
+                info['no_services'] = True
                 try:
                     self.simulator.step()
                     self.current_step += 1
@@ -506,6 +510,10 @@ class EdgeEnv(BaseEdgeEnv):
         try:
             if action >= self.action_space.n:
                 return False
+            
+            # If no services to migrate, treat any in-range action as a valid no-op
+            if not self.services_to_migrate or self.current_service_idx >= len(self.services_to_migrate):
+                return True
             
             # No-migration is always valid if enabled
             if self.allow_no_migration and action == self.num_servers:
