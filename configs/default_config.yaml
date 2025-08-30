@@ -22,7 +22,6 @@ env:
   # Action space configuration  
   action:
     type: "discrete"  # discrete or continuous
-    allow_no_migration: true
 
 # Reward configuration
 reward:

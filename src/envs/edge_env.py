@@ -48,7 +48,8 @@ class EdgeEnv(BaseEdgeEnv):
         
         # Action configuration
         self.action_config = config.get("action", {})
-        self.allow_no_migration = self.action_config.get("allow_no_migration", True)
+        # No explicit no-migration action; selecting the current server means no-op
+        self.allow_no_migration = False
         
         # Randomization and scheduler configuration
         self.randomize_initial_placement = bool(config.get("randomize_initial_placement", True))
@@ -240,12 +241,8 @@ class EdgeEnv(BaseEdgeEnv):
             )
             
             # Define action space (discrete: which server to migrate to)
-            # Add 1 for no-migration action if enabled
-            action_dim = self.num_servers
-            if self.allow_no_migration:
-                action_dim += 1
-                
-            self.action_space = spaces.Discrete(action_dim)
+            # No explicit no-migration action; selecting current server means no-op
+            self.action_space = spaces.Discrete(self.num_servers)
             
         except Exception as e:
             print(f"Error initializing spaces: {e}")
@@ -393,11 +390,6 @@ class EdgeEnv(BaseEdgeEnv):
                         else:
                             info['valid_action'] = False
                             pattern_choice = -1
-                    else:
-                        # No migration action
-                        info['migration'] = False
-                        info['valid_action'] = True
-                        pattern_choice = -1
                 else:
                     info['valid_action'] = False
                     pattern_choice = -1
@@ -427,7 +419,8 @@ class EdgeEnv(BaseEdgeEnv):
             if decided_service_id is not None:
                 info['service_id'] = decided_service_id
                 info['pattern_choice'] = pattern_choice
-                info['no_migration_action'] = True if pattern_choice == -1 else False
+                # Mark no-migration when action was valid and resulted in no migration (e.g., selecting current server)
+                info['no_migration_action'] = bool(info.get('valid_action', False) and not info.get('migration', False))
             
             # Add runtime metrics to info before calculating reward (so rewards can use them)
             try:
@@ -591,28 +584,27 @@ class EdgeEnv(BaseEdgeEnv):
         """Check if action is valid in current state.
         
         Args:
-            action: Server index or no-migration action
+            action: Server index to migrate current service to (no explicit no-migration action)
             
         Returns:
             True if action is valid
         """
         try:
-            if action >= self.action_space.n:
+            # Out-of-range actions are invalid
+            if action >= self.num_servers or action < 0:
                 return False
             
             # If no services to migrate, treat any in-range action as a valid no-op
             if not self.services_to_migrate or self.current_service_idx >= len(self.services_to_migrate):
                 return True
             
-            # No-migration is always valid if enabled
-            if self.allow_no_migration and action == self.num_servers:
-                return True
-            
-            # Check if migration to server is valid
+            # Check if migration to server is valid (selecting current server is always valid as no-op)
             servers = EdgeServer.all()
-            if action < self.num_servers and action < len(servers) and self.current_service_idx < len(self.services_to_migrate):
+            if action < len(servers) and self.current_service_idx < len(self.services_to_migrate):
                 service = self.services_to_migrate[self.current_service_idx]
                 target_server = servers[action]
+                if service.server is not None and target_server == service.server:
+                    return True  # selecting current host means no migration (always valid)
                 return target_server.has_capacity_to_host(service)
             
             return False

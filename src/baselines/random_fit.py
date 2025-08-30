@@ -2,7 +2,7 @@
 
 This baseline selects uniformly at random among the feasible target servers
 that can host the current service (and differ from current host).
-Falls back to no-migration when no feasible target exists (if allowed).
+Falls back to staying on the current host (no migration) when no feasible target exists.
 """
 
 from typing import Dict, Any
@@ -16,21 +16,22 @@ from edge_sim_py.components import EdgeServer
 
 
 class RandomFitBaseline:
-    def __init__(self, allow_no_migration: bool = True):
-        self.allow_no_migration = allow_no_migration
+    def __init__(self):
+        pass
 
     def select_action(self, env) -> int:
         """Select a random feasible target server for the current service.
 
         - Builds the set of servers that can host the service and differ from the current host.
         - Returns the index of a random choice.
-        - Falls back to no-migration (if allowed) or current host index.
+        - Falls back to the current host index (no migration) when no feasible target exists.
         """
         servers = EdgeServer.all()
         service = env.get_current_service()
 
         if service is None or not servers:
-            return env.num_servers if getattr(env, "allow_no_migration", True) else 0
+            # No current service: return any valid index (0 is safe as action space is [0, num_servers-1])
+            return 0
 
         try:
             candidates = []
@@ -49,13 +50,12 @@ class RandomFitBaseline:
             pass
 
         # Fallbacks
-        if getattr(env, "allow_no_migration", True):
-            return env.num_servers
         try:
-            if service.server in servers:
+            if service and service.server in servers:
                 return servers.index(service.server)
         except Exception:
             pass
+        # Last resort: pick index 0
         return 0
 
 
@@ -68,7 +68,7 @@ def evaluate_random_fit(env_class, env_config: Dict[str, Any], num_episodes: int
     - summary.txt: mean/std rewards (best-effort if utils unavailable)
     """
     env = env_class(env_config)
-    policy = RandomFitBaseline(allow_no_migration=getattr(env, "allow_no_migration", True))
+    policy = RandomFitBaseline()
 
     abs_log_root = os.path.abspath(log_root)
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')

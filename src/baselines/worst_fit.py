@@ -15,22 +15,23 @@ from edge_sim_py.components import EdgeServer
 
 
 class WorstFitBaseline:
-    def __init__(self, allow_no_migration: bool = True):
-        self.allow_no_migration = allow_no_migration
+    def __init__(self):
+        pass
 
     def select_action(self, env) -> int:
         """Select target server index for the current service using worst-fit.
 
         - Ranks edge servers by free resource capacity (geometric mean).
         - Picks the first server with enough capacity and different from current host.
-        - Falls back to no-migration (if allowed) or current-host index.
+        - Falls back to the current-host index (no migration) when no feasible target exists.
         """
         servers = EdgeServer.all()
         service = env.get_current_service()
 
         # If no current service, no-op.
         if service is None or not servers:
-            return env.num_servers if getattr(env, "allow_no_migration", True) else 0
+            # No current service: return any valid index (0 is safe as action space is [0, num_servers-1])
+            return 0
 
         # Compute free capacity with geometric mean of free CPU, MEM, DISK
         def free_score(s):
@@ -52,15 +53,13 @@ class WorstFitBaseline:
                 continue
 
         # Fallbacks
-        if getattr(env, "allow_no_migration", True):
-            return env.num_servers  # no-migration action index
-
         # Last resort: stay on current server
         try:
-            if service.server in servers:
+            if service and service.server in servers:
                 return servers.index(service.server)
         except Exception:
             pass
+        # Fallback: pick index 0
         return 0
 
 
@@ -74,7 +73,7 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
     """
     # Lazy import to avoid circulars
     env = env_class(env_config)
-    policy = WorstFitBaseline(allow_no_migration=getattr(env, "allow_no_migration", True))
+    policy = WorstFitBaseline()
 
     abs_log_root = os.path.abspath(log_root)
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
