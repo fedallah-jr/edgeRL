@@ -1963,7 +1963,7 @@
                         "id": 1
                     }
                 },
-                "mobility_model": "random_mobility_mobility",
+                "mobility_model": "random_mobility",
                 "applications": [
                     {
                         "class": "Application",
@@ -2249,7 +2249,7 @@
                         "id": 2
                     }
                 },
-                "mobility_model": "random_mobility_mobility",
+                "mobility_model": "random_mobility",
                 "applications": [
                     {
                         "class": "Application",
