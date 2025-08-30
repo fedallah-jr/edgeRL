@@ -178,10 +178,14 @@ def main():
                 from src.baselines.worst_fit import evaluate_worst_fit
                 from src.envs.edge_env import EdgeEnv
                 print(f"\nRunning baseline evaluation: {args.baseline}")
+                # Merge reward config into env_config so the environment can use it during baseline evals
+                merged_env_cfg = dict(config.get('env', {}) or {})
+                if isinstance(config.get('reward', None), dict):
+                    merged_env_cfg['reward'] = config['reward']
                 if args.baseline == 'worst_fit':
                     results = evaluate_worst_fit(
                         env_class=EdgeEnv,
-                        env_config=config.get('env', {}),
+                        env_config=merged_env_cfg,
                         num_episodes=args.eval_episodes,
                         log_root=config.get('training', {}).get('log_dir', 'logs/')
                     )
@@ -189,7 +193,7 @@ def main():
                     from src.baselines.random_fit import evaluate_random_fit
                     results = evaluate_random_fit(
                         env_class=EdgeEnv,
-                        env_config=config.get('env', {}),
+                        env_config=merged_env_cfg,
                         num_episodes=args.eval_episodes,
                         log_root=config.get('training', {}).get('log_dir', 'logs/')
                     )

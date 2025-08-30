@@ -90,7 +90,17 @@ class RLTrainer:
         """
         self.config = config
         self.algorithm_name = config['algorithm']['name']
-        self.env_config = config.get('env', {})
+        # Merge env and reward configs so the environment can see reward settings
+        base_env_cfg = config.get('env', {}) or {}
+        try:
+            merged_env_cfg = dict(base_env_cfg)  # shallow copy
+        except Exception:
+            merged_env_cfg = base_env_cfg
+        reward_cfg = config.get('reward', None)
+        if isinstance(reward_cfg, dict):
+            merged_env_cfg['reward'] = reward_cfg
+        self.env_config = merged_env_cfg
+
         self.training_config = config.get('training', {})
         self.resource_config = config.get('resources', {})
         
