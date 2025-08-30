@@ -17,6 +17,7 @@ env:
     include_server_metrics: true
     include_service_metrics: true
     normalize: true
+    include_user_server_distance_matrix: true
   
   # Action space configuration  
   action:

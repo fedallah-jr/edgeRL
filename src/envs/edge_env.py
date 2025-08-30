@@ -41,6 +41,10 @@ class EdgeEnv(BaseEdgeEnv):
         self.include_server_metrics = self.state_config.get("include_server_metrics", True)
         self.include_service_metrics = self.state_config.get("include_service_metrics", True)
         self.normalize_state = self.state_config.get("normalize", True)
+        # Distance features: include full server-user distance matrix (flattened)
+        self.include_distance_matrix = self.state_config.get("include_user_server_distance_matrix", True)
+        # Normalization helper for distances
+        self._max_distance = 1.0
         
         # Action configuration
         self.action_config = config.get("action", {})
@@ -90,6 +94,12 @@ class EdgeEnv(BaseEdgeEnv):
             
             # Load dataset
             self.simulator.initialize(input_file=self.dataset_path)
+
+            # Compute distance normalization factor (map diagonal) after dataset load
+            try:
+                self._compute_max_distance()
+            except Exception:
+                self._max_distance = 1.0
             
             # Initialize services on servers to avoid initial empty state
             # This is a workaround for the initial service placement
@@ -169,18 +179,56 @@ class EdgeEnv(BaseEdgeEnv):
             # Silent fail - initial placement is optional
             pass
         
+    def _compute_max_distance(self):
+        """Compute a normalization factor for distances (map diagonal length)."""
+        try:
+            coords = []
+            try:
+                # Prefer base station coordinates as ground-truth for site positions
+                for bs in BaseStation.all():
+                    c = getattr(bs, 'coordinates', None)
+                    if c and len(c) >= 2:
+                        coords.append((float(c[0]), float(c[1])))
+            except Exception:
+                pass
+            try:
+                for s in EdgeServer.all():
+                    c = getattr(s, 'coordinates', None)
+                    if c and len(c) >= 2:
+                        coords.append((float(c[0]), float(c[1])))
+            except Exception:
+                pass
+            if coords:
+                xs = [c[0] for c in coords]
+                ys = [c[1] for c in coords]
+                dx = max(xs) - min(xs)
+                dy = max(ys) - min(ys)
+                diag = (dx ** 2 + dy ** 2) ** 0.5
+                self._max_distance = float(diag) if diag > 0 else 1.0
+            else:
+                self._max_distance = 1.0
+        except Exception:
+            self._max_distance = 1.0
+
     def _init_spaces(self):
         """Initialize observation and action spaces."""
         try:
             # Get environment dimensions
             self.num_servers = EdgeServer.count()
             self.num_services = Service.count()
+            # Track number of users for distance matrix
+            try:
+                self.num_users = User.count()
+            except Exception:
+                self.num_users = 0
             
             # Handle edge case where no servers or services exist
             if self.num_servers == 0:
                 self.num_servers = 1
             if self.num_services == 0:
                 self.num_services = 1
+            if getattr(self, 'num_users', 0) == 0:
+                self.num_users = 1
             
             # Define observation space
             obs_dim = self._get_observation_dim()
@@ -221,6 +269,11 @@ class EdgeEnv(BaseEdgeEnv):
         if self.include_service_metrics:
             # Current server one-hot encoding + resource demands
             dim += self.num_servers + 3  # one-hot + cpu + mem + state_size
+
+        # Full server-user distance matrix (flattened)
+        if getattr(self, 'include_distance_matrix', False):
+            # num_servers x num_users
+            dim += self.num_servers * getattr(self, 'num_users', 1)
             
         # Ensure minimum dimension
         return max(dim, 1)
@@ -477,6 +530,46 @@ class EdgeEnv(BaseEdgeEnv):
             elif self.include_service_metrics:
                 # Pad with zeros if no service to migrate
                 state.extend([0] * (self.num_servers + 3))
+
+            
+            # Full server-user distance matrix (flattened row-major: server, then user)
+            if getattr(self, 'include_distance_matrix', False):
+                try:
+                    servers_list = servers or []
+                    try:
+                        users_all = sorted(User.all(), key=lambda u: getattr(u, 'id', 0))
+                    except Exception:
+                        users_all = []
+                    # Prepare flat list with fixed size num_servers*num_users
+                    mat = [0.0] * (self.num_servers * getattr(self, 'num_users', 1))
+                    # Fill available entries up to current counts
+                    s_count = min(len(servers_list), self.num_servers)
+                    u_count = min(len(users_all), getattr(self, 'num_users', 1))
+                    for sj in range(s_count):
+                        srv = servers_list[sj]
+                        cs = getattr(srv, 'coordinates', None)
+                        if not cs or len(cs) < 2:
+                            continue
+                        sx, sy = float(cs[0]), float(cs[1])
+                        for ui in range(u_count):
+                            u = users_all[ui]
+                            cu = getattr(u, 'coordinates', None)
+                            if not cu or len(cu) < 2:
+                                d = 0.0
+                            else:
+                                ux, uy = float(cu[0]), float(cu[1])
+                                d = ((ux - sx) ** 2 + (uy - sy) ** 2) ** 0.5
+                            if getattr(self, 'normalize_state', True):
+                                denom = float(getattr(self, '_max_distance', 1.0)) or 1.0
+                                d = d / denom
+                            # row-major index
+                            idx = sj * getattr(self, 'num_users', 1) + ui
+                            if 0 <= idx < len(mat):
+                                mat[idx] = float(d)
+                    state.extend(mat)
+                except Exception:
+                    # If any error, extend with zeros of expected size
+                    state.extend([0.0] * (self.num_servers * getattr(self, 'num_users', 1)))
             
             # Ensure state has correct dimension
             if len(state) == 0:
