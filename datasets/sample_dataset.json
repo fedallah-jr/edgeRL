@@ -1963,7 +1963,7 @@
                         "id": 1
                     }
                 },
-                "mobility_model": "pathway",
+                "mobility_model": "random",
                 "applications": [
                     {
                         "class": "Application",
@@ -2249,7 +2249,7 @@
                         "id": 2
                     }
                 },
-                "mobility_model": "pathway",
+                "mobility_model": "random",
                 "applications": [
                     {
                         "class": "Application",
@@ -2535,7 +2535,7 @@
                         "id": 3
                     }
                 },
-                "mobility_model": "pathway",
+                "mobility_model": "random",
                 "applications": [
                     {
                         "class": "Application",
@@ -2821,7 +2821,7 @@
                         "id": 4
                     }
                 },
-                "mobility_model": "pathway",
+                "mobility_model": "random",
                 "applications": [
                     {
                         "class": "Application",
@@ -3107,7 +3107,7 @@
                         "id": 5
                     }
                 },
-                "mobility_model": "pathway",
+                "mobility_model": "random",
                 "applications": [
                     {
                         "class": "Application",
@@ -3393,7 +3393,7 @@
                         "id": 6
                     }
                 },
-                "mobility_model": "pathway",
+                "mobility_model": "random",
                 "applications": [
                     {
                         "class": "Application",
