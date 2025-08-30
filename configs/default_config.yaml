@@ -27,7 +27,8 @@ env:
 reward:
   # Available reward types: power, latency
   type: "power"  # power or latency
-  power_weight: 1.0   # Used by power reward only
+  power_weight: 1.0   # Multiplier for power reward
+  power_scale: 1000.0 # Scale for normalization of power (similar to latency_scale)
   normalize: true     # Used by both rewards for scaling
   penalty_invalid_action: -10.0  # Applied when actions are invalid (if any)
 

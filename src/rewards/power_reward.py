@@ -1,4 +1,9 @@
-"""Power consumption-based reward functions."""
+"""Power consumption-based reward functions.
+
+This reward uses the instantaneous total power (not the change/difference)
+across all edge servers, mirroring the style of the latency reward where the
+reward is the negative of the current metric.
+"""
 
 import numpy as np
 from typing import Dict, Any
@@ -6,97 +11,75 @@ from edge_sim_py.components.edge_server import EdgeServer
 
 
 class PowerReward:
-    """Reward calculator based on power consumption.
-    
-    This class implements reward calculation focused on minimizing
-    total power consumption across edge servers.
+    """Reward calculator based on instantaneous total power consumption.
+
+    Config options:
+    - power_weight: float (default 1.0). Multiplies the negative total power.
+    - normalize: bool (default True). If True, scales the reward using power_scale and clips to [-1, 1].
+    - power_scale: float (default 1000.0). Denominator for normalization when normalize=True.
+    - penalty_invalid_action: float (default -10.0). Penalty when info['valid_action'] is False.
     """
-    
+
     def __init__(self, config: Dict[str, Any]):
         """Initialize power reward calculator.
-        
+
         Args:
             config: Reward configuration dictionary
         """
-        self.config = config
-        self.weight = config.get("power_weight", 1.0)
-        self.normalize = config.get("normalize", True)
-        self.penalty_invalid = config.get("penalty_invalid_action", -10.0)
-        
-        # Track previous power consumption for difference reward
-        self.previous_power = None
-        
-    def calculate(self, 
+        self.config = config or {}
+        self.weight = float(self.config.get("power_weight", 1.0))
+        self.normalize = bool(self.config.get("normalize", True))
+        self.scale = float(self.config.get("power_scale", 1000.0))
+        self.penalty_invalid = float(self.config.get("penalty_invalid_action", -10.0))
+
+    def calculate(self,
                   state: np.ndarray,
                   action: int,
                   next_state: np.ndarray,
                   info: Dict[str, Any]) -> float:
-        """Calculate reward based on power consumption.
-        
-        Args:
-            state: State before action
-            action: Action taken
-            next_state: State after action
-            info: Additional information from environment
-            
-        Returns:
-            Calculated reward value
-        """
-        # Check for invalid action
+        """Calculate reward based on instantaneous total power consumption."""
+        # Invalid action penalty if requested
         if not info.get('valid_action', True):
-            return self.penalty_invalid
-        
-        # Calculate current total power consumption
-        current_power = self._calculate_total_power()
-        
-        # Debug: print power consumption
-        if self.config.get('debug', False):
-            print(f"Current power: {current_power}, Previous: {self.previous_power}")
-        
-        # Base reward: negative power consumption (minimize)
-        reward = -current_power * self.weight
-        
-        # If we have previous power, use difference as reward
-        if self.previous_power is not None:
-            power_diff = current_power - self.previous_power
-            reward = -power_diff * self.weight  # Negative because we want to minimize
-            
-            # Bonus for reducing power
-            if power_diff < 0:
-                reward += abs(power_diff) * 0.5  # Extra reward for improvement
-        
-        # Update previous power
-        self.previous_power = current_power
-        
-        # Normalize reward if configured
+            return float(self.penalty_invalid)
+
+        # Prefer total power from info (environment populates it before reward calc)
+        total_power = None
+        for k in ("total_power", "power_total", "sum_power"):
+            if k in info and info[k] is not None:
+                try:
+                    total_power = float(info[k])
+                    break
+                except Exception:
+                    pass
+        if total_power is None:
+            # Fallback: compute from servers directly
+            total_power = float(self._calculate_total_power())
+
+        # Base reward: negative instantaneous total power (we want to minimize it)
+        reward = -total_power * self.weight
+
         if self.normalize:
-            # Normalize to roughly [-1, 1] range
-            # Assuming max power change is around 100W
-            reward = np.clip(reward / 100.0, -1.0, 1.0)
-        
-        # Add small bonus for successful migration
+            denom = self.scale if self.scale > 0 else 1.0
+            reward = float(np.clip(reward / denom, -1.0, 1.0))
+
+        # Optional small bonus for successful migration (kept from previous implementation)
         if info.get('migration', False):
             reward += 0.1
-        
-        # Provide a small non-zero reward even if power is zero
-        if abs(reward) < 0.001:
-            # Give small negative reward to encourage exploration
-            reward = -0.01
-        
+
         return float(reward)
-    
+
     def _calculate_total_power(self) -> float:
-        """Calculate total power consumption across all servers.
-        
-        Returns:
-            Total power consumption
-        """
-        total_power = sum(
-            server.get_power_consumption() 
-            for server in EdgeServer.all()
-        )
-        return total_power
-    
+        """Calculate total power consumption across all servers."""
+        total_power = 0.0
+        try:
+            total_power = sum(
+                server.get_power_consumption()
+                for server in EdgeServer.all()
+            )
+        except Exception:
+            total_power = 0.0
+        return float(total_power)
+
     def reset(self):
-        """Reset reward calculator state."""
-        self.previous_power = self._calculate_total_power()
+        """No state to reset for instantaneous power reward."""
+        return None
