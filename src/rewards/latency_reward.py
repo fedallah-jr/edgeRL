@@ -22,7 +22,8 @@ class LatencyReward:
     - normalize: bool (default True). If True, scale reward roughly to [-1, 1].
       Uses `latency_scale` as divisor before clipping.
     - latency_scale: float (default 100.0). Scale used when normalize is True.
-    - penalty_invalid_action: float (default -10.0). Penalty used when info['valid_action'] is False.
+    - penalty_invalid_action: float (default -10.0). Penalty added when info['valid_action'] is False
+      (previously, invalid actions replaced the latency-based reward entirely).
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -37,9 +38,8 @@ class LatencyReward:
                   action: int,
                   next_state,
                   info: Dict[str, Any]) -> float:
-        # Invalid action penalty if requested
-        if not info.get('valid_action', True):
-            return float(self.penalty_invalid)
+        # Track invalid action but do not early-return; we will add the penalty to the latency-based reward
+        is_invalid = not info.get('valid_action', True)
 
         # Prefer latency from info (Environment should populate these before reward calculation)
         latency = None
@@ -81,12 +81,23 @@ class LatencyReward:
         if latency is None:
             return -0.01
 
-        # Reward is negative latency (we want to minimize latency)
+        # Base reward: negative latency (we want to minimize latency)
         reward = -float(latency)
 
+        # Normalize if requested
         if self.normalize:
             denom = self.scale if self.scale > 0 else 1.0
             reward = float(np.clip(reward / denom, -1.0, 1.0))
+
+        # Add invalid-action penalty (instead of replacing the reward)
+        if is_invalid:
+            try:
+                reward += float(self.penalty_invalid)
+                # Keep final reward within [-1, 1] when normalized
+                if self.normalize:
+                    reward = float(np.clip(reward, -1.0, 1.0))
+            except Exception:
+                pass
 
         return reward
 
