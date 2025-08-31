@@ -9,6 +9,7 @@ from edge_sim_py.activation_schedulers.random_scheduler import RandomScheduler
 from .base_env import BaseEdgeEnv
 from ..rewards.power_reward import PowerReward
 from ..rewards.latency_reward import LatencyReward
+from ..rewards.inverse_power_reward import InversePowerReward
 
 
 class EdgeEnv(BaseEdgeEnv):
@@ -63,6 +64,8 @@ class EdgeEnv(BaseEdgeEnv):
             self.reward_calculator = PowerReward(reward_config)
         elif reward_type == "latency":
             self.reward_calculator = LatencyReward(reward_config)
+        elif reward_type in ("inverse_power", "inv_power", "inverse-power"):
+            self.reward_calculator = InversePowerReward(reward_config)
         else:
             # Default to power reward if unknown type
             self.reward_calculator = PowerReward(reward_config)

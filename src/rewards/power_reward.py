@@ -62,9 +62,6 @@ class PowerReward:
             denom = self.scale if self.scale > 0 else 1.0
             reward = float(np.clip(reward / denom, -1.0, 1.0))
 
-        # Optional small bonus for successful migration (kept from previous implementation)
-        if info.get('migration', False):
-            reward += 0.1
 
         # Add invalid-action penalty (instead of replacing the reward)
         if is_invalid:

@@ -25,12 +25,16 @@ env:
 
 # Reward configuration
 reward:
-  # Available reward types: power, latency
-  type: "latency"  # power or latency
-  power_weight: 1.0   # Multiplier for power reward
-  power_scale: 1000.0 # Scale for normalization of power (similar to latency_scale)
-  normalize: true     # Used by both rewards for scaling
-  penalty_invalid_action: 0.0  # Applied when actions are invalid (if any)
+  # Available reward types: power, latency, inverse_power
+  type: "inverse_power"  # power, latency, or inverse_power
+  mode: "inverse_of_sum"  # inverse_of_sum or sum_of_inverses
+  power_weight: 1.0      # Multiplier for power reward
+  power_scale: 1000.0    # Scale for normalization of power (similar to latency_scale)
+  # Inverse-power reward optional params (used when type: inverse_power)
+  inverse_power_weight: 1.0  # Multiplier for inverse-power reward (falls back to power_weight)
+  inv_power_scale: 1.0       # Scale for normalization of inverse-power reward (falls back to power_scale)
+  normalize: false      # Used by all rewards for scaling
+  penalty_invalid_action: 0.0  # Applied when actions are invalid (added to the reward)
 
 # Training configuration
 training:
