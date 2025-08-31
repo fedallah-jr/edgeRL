@@ -17,7 +17,8 @@ class PowerReward:
     - power_weight: float (default 1.0). Multiplies the negative total power.
     - normalize: bool (default True). If True, scales the reward using power_scale and clips to [-1, 1].
     - power_scale: float (default 1000.0). Denominator for normalization when normalize=True.
-    - penalty_invalid_action: float (default -10.0). Penalty when info['valid_action'] is False.
+    - penalty_invalid_action: float (default -10.0). Penalty added when info['valid_action'] is False
+      (applied after normalization and clipped if normalize=True).
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -38,9 +39,8 @@ class PowerReward:
                   next_state: np.ndarray,
                   info: Dict[str, Any]) -> float:
         """Calculate reward based on instantaneous total power consumption."""
-        # Invalid action penalty if requested
-        if not info.get('valid_action', True):
-            return float(self.penalty_invalid)
+        # Track invalid action but do not early-return; we will add the penalty to the power-based reward
+        is_invalid = not info.get('valid_action', True)
 
         # Prefer total power from info (environment populates it before reward calc)
         total_power = None
@@ -65,6 +65,15 @@ class PowerReward:
         # Optional small bonus for successful migration (kept from previous implementation)
         if info.get('migration', False):
             reward += 0.1
+
+        # Add invalid-action penalty (instead of replacing the reward)
+        if is_invalid:
+            try:
+                reward += float(self.penalty_invalid)
+                if self.normalize:
+                    reward = float(np.clip(reward, -1.0, 1.0))
+            except Exception:
+                pass
 
         return float(reward)
 
