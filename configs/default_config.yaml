@@ -26,16 +26,16 @@ env:
 # Reward configuration
 reward:
   # Available reward types: power, latency
-  type: "power"  # power or latency
+  type: "latency"  # power or latency
   power_weight: 1.0   # Multiplier for power reward
   power_scale: 1000.0 # Scale for normalization of power (similar to latency_scale)
   normalize: true     # Used by both rewards for scaling
-  penalty_invalid_action: -10.0  # Applied when actions are invalid (if any)
+  penalty_invalid_action: 0.0  # Applied when actions are invalid (if any)
 
 # Training configuration
 training:
   seed: 42
-  num_episodes: 1000
+  num_episodes: 400
   checkpoint_freq: 100
   checkpoint_dir: "checkpoints/"
   log_dir: "logs/"
@@ -48,6 +48,6 @@ resources:
   
 # Evaluation configuration
 evaluation:
-  eval_episodes: 10
+  eval_episodes: 5
   eval_interval: 50
   save_best_model: true
