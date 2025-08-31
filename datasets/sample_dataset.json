@@ -1959,7 +1959,7 @@
             "relationships": {
                 "access_patterns": {
                     "1": {
-                        "class": "CircularDurationAndIntervalAccessPattern",
+                        "class": "RandomDurationAndIntervalAccessPattern",
                         "id": 1
                     }
                 },
@@ -2245,7 +2245,7 @@
             "relationships": {
                 "access_patterns": {
                     "2": {
-                        "class": "CircularDurationAndIntervalAccessPattern",
+                        "class": "RandomDurationAndIntervalAccessPattern",
                         "id": 2
                     }
                 },
@@ -2531,7 +2531,7 @@
             "relationships": {
                 "access_patterns": {
                     "3": {
-                        "class": "CircularDurationAndIntervalAccessPattern",
+                        "class": "RandomDurationAndIntervalAccessPattern",
                         "id": 3
                     }
                 },
@@ -2817,7 +2817,7 @@
             "relationships": {
                 "access_patterns": {
                     "4": {
-                        "class": "CircularDurationAndIntervalAccessPattern",
+                        "class": "RandomDurationAndIntervalAccessPattern",
                         "id": 4
                     }
                 },
@@ -3103,7 +3103,7 @@
             "relationships": {
                 "access_patterns": {
                     "5": {
-                        "class": "CircularDurationAndIntervalAccessPattern",
+                        "class": "RandomDurationAndIntervalAccessPattern",
                         "id": 5
                     }
                 },
@@ -3389,7 +3389,7 @@
             "relationships": {
                 "access_patterns": {
                     "6": {
-                        "class": "CircularDurationAndIntervalAccessPattern",
+                        "class": "RandomDurationAndIntervalAccessPattern",
                         "id": 6
                     }
                 },
@@ -4728,7 +4728,140 @@
             }
         }
     ],
-    "RandomDurationAndIntervalAccessPattern": [],
+    "RandomDurationAndIntervalAccessPattern": [
+        {
+            "attributes": {
+                "id": 1,
+                "duration_values": [5, 10, 15, 20, 30],
+                "interval_values": [0, 5, 10, 15],
+                "history": [
+                    {
+                        "start": 1,
+                        "end": 10,
+                        "duration": 10,
+                        "waiting_time": 0,
+                        "access_time": 0,
+                        "interval": 5,
+                        "next_access": 16
+                    }
+                ]
+            },
+            "relationships": {
+                "user": {"class": "User", "id": 1},
+                "app": {"class": "Application", "id": 1}
+            }
+        },
+        {
+            "attributes": {
+                "id": 2,
+                "duration_values": [5, 10, 15, 20, 30],
+                "interval_values": [0, 5, 10, 15],
+                "history": [
+                    {
+                        "start": 1,
+                        "end": 15,
+                        "duration": 15,
+                        "waiting_time": 0,
+                        "access_time": 0,
+                        "interval": 10,
+                        "next_access": 26
+                    }
+                ]
+            },
+            "relationships": {
+                "user": {"class": "User", "id": 2},
+                "app": {"class": "Application", "id": 2}
+            }
+        },
+        {
+            "attributes": {
+                "id": 3,
+                "duration_values": [5, 10, 15, 20, 30],
+                "interval_values": [0, 5, 10, 15],
+                "history": [
+                    {
+                        "start": 1,
+                        "end": 20,
+                        "duration": 20,
+                        "waiting_time": 0,
+                        "access_time": 0,
+                        "interval": 5,
+                        "next_access": 26
+                    }
+                ]
+            },
+            "relationships": {
+                "user": {"class": "User", "id": 3},
+                "app": {"class": "Application", "id": 3}
+            }
+        },
+        {
+            "attributes": {
+                "id": 4,
+                "duration_values": [5, 10, 15, 20, 30],
+                "interval_values": [0, 5, 10, 15],
+                "history": [
+                    {
+                        "start": 1,
+                        "end": 5,
+                        "duration": 5,
+                        "waiting_time": 0,
+                        "access_time": 0,
+                        "interval": 0,
+                        "next_access": 6
+                    }
+                ]
+            },
+            "relationships": {
+                "user": {"class": "User", "id": 4},
+                "app": {"class": "Application", "id": 4}
+            }
+        },
+        {
+            "attributes": {
+                "id": 5,
+                "duration_values": [5, 10, 15, 20, 30],
+                "interval_values": [0, 5, 10, 15],
+                "history": [
+                    {
+                        "start": 1,
+                        "end": 30,
+                        "duration": 30,
+                        "waiting_time": 0,
+                        "access_time": 0,
+                        "interval": 10,
+                        "next_access": 41
+                    }
+                ]
+            },
+            "relationships": {
+                "user": {"class": "User", "id": 5},
+                "app": {"class": "Application", "id": 5}
+            }
+        },
+        {
+            "attributes": {
+                "id": 6,
+                "duration_values": [5, 10, 15, 20, 30],
+                "interval_values": [0, 5, 10, 15],
+                "history": [
+                    {
+                        "start": 1,
+                        "end": 10,
+                        "duration": 10,
+                        "waiting_time": 0,
+                        "access_time": 0,
+                        "interval": 15,
+                        "next_access": 26
+                    }
+                ]
+            },
+            "relationships": {
+                "user": {"class": "User", "id": 6},
+                "app": {"class": "Application", "id": 6}
+            }
+        }
+    ],
     "CircularDurationAndIntervalAccessPattern": [
         {
             "attributes": {
