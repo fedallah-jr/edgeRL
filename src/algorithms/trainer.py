@@ -293,8 +293,11 @@ class RLTrainer:
                 # Custom metrics
                 custom_metrics = result.get("custom_metrics", {})
                 
-                # Print progress
-                if episode_count % 10 == 0 or episode_count == 1:
+                # Determine if we have valid episode metrics (avoid first-iter zeros)
+                has_valid_episode = isinstance(episode_len, (int, float)) and episode_len > 0
+
+                # Print progress only when an episode has actually completed
+                if has_valid_episode and (episode_count % 10 == 0 or episode_count == 1):
                     print(f"\nEpisode {episode_count}/{num_episodes}")
                     print(f"  Reward: {episode_reward:.2f}")
                     print(f"  Length: {episode_len:.0f}")
@@ -310,8 +313,8 @@ class RLTrainer:
                     checkpoint = self.trainer.save(checkpoint_dir)
                     print(f"  Checkpoint saved: {checkpoint}")
                 
-                # Save best model
-                if episode_reward > best_reward:
+                # Save best model only when we have valid episode metrics
+                if has_valid_episode and episode_reward > best_reward:
                     best_reward = episode_reward
                     if self.training_config.get('evaluation', {}).get('save_best_model', True):
                         best_checkpoint = self.trainer.save(best_checkpoint_dir)
