@@ -154,13 +154,17 @@ class RLTrainer:
         # Prefer new RLModule API to avoid deprecation warnings
         try:
             model_cfg = dqn_cfg_dict.get('model', {}) if isinstance(dqn_cfg_dict, dict) else {}
-            cfg = cfg.rl_module(
-                rl_module_spec=RLModuleSpec(
-                    model_config_dict=model_cfg,
+            # Use model_config kwarg (new API). Fallback to RLModuleSpec if not available.
+            try:
+                cfg = cfg.rl_module(model_config=model_cfg)
+            except Exception:
+                cfg = cfg.rl_module(
+                    rl_module_spec=RLModuleSpec(
+                        model_config_dict=model_cfg,
+                    )
                 )
-            )
         except Exception:
-            # If RLlib version does not support this call, continue without it
+            # If RLlib version does not support these calls, continue without it
             pass
         
         # Resources configuration
@@ -259,13 +263,17 @@ class RLTrainer:
         # Prefer new RLModule API to avoid deprecation warnings
         try:
             model_cfg = ppo_cfg_dict.get('model', {}) if isinstance(ppo_cfg_dict, dict) else {}
-            cfg = cfg.rl_module(
-                rl_module_spec=RLModuleSpec(
-                    model_config_dict=model_cfg,
+            # Use model_config kwarg (new API). Fallback to RLModuleSpec if not available.
+            try:
+                cfg = cfg.rl_module(model_config=model_cfg)
+            except Exception:
+                cfg = cfg.rl_module(
+                    rl_module_spec=RLModuleSpec(
+                        model_config_dict=model_cfg,
+                    )
                 )
-            )
         except Exception:
-            # If RLlib version does not support this call, continue without it
+            # If RLlib version does not support these calls, continue without it
             pass
         
         # Resources configuration
@@ -538,6 +546,37 @@ class RLTrainer:
         except Exception as e:
             print(f"Failed to construct evaluation environment: {e}")
             env = None
+
+        # Prepare RLModule for inference (new API)
+        module = None
+        try:
+            module = self.trainer.get_module()
+        except Exception:
+            pass
+        if module is None:
+            for mid in ("default_module", "default_policy", "policy_0"):
+                try:
+                    module = self.trainer.get_module(mid)
+                    if module is not None:
+                        break
+                except Exception:
+                    continue
+        if module is None:
+            it = getattr(self.trainer, "iter_modules", None)
+            if callable(it):
+                try:
+                    first = next(it())
+                    module = first[1] if isinstance(first, (list, tuple)) and len(first) >= 2 else first
+                except Exception:
+                    pass
+        if module is None:
+            print("Warning: No RLModule available for inference; will try legacy compute_actions.")
+        else:
+            # Put module into eval mode if supported
+            try:
+                module.eval()
+            except Exception:
+                pass
         
         for episode in range(num_episodes):
             ep_reward = 0.0
@@ -564,63 +603,37 @@ class RLTrainer:
                 truncated = False
                 step_idx = 0
                 while not (terminated or truncated):
-                    # Compute action with robust fallbacks across RLlib APIs
-                    try:
-                        action = self.trainer.compute_single_action(obs, explore=False)
-                    except Exception:
-                        try:
-                            acts = self.trainer.compute_actions([obs], explore=False)
-                            action = acts[0][0] if isinstance(acts, tuple) else acts[0]
-                        except Exception:
-                            # RLModule-based inference (new API)
-                            import numpy as _np
-                            import torch as _torch
-                            module = None
-                            try:
-                                module = self.trainer.get_module()
-                            except Exception:
-                                pass
-                            if module is None:
-                                for mid in ("default_module", "default_policy", "policy_0"):
-                                    try:
-                                        module = self.trainer.get_module(mid)
-                                        if module is not None:
-                                            break
-                                    except Exception:
-                                        continue
-                            if module is None:
-                                it = getattr(self.trainer, "iter_modules", None)
-                                if callable(it):
-                                    try:
-                                        first = next(it())
-                                        module = first[1] if isinstance(first, (list, tuple)) and len(first) >= 2 else first
-                                    except Exception:
-                                        pass
-                            if module is None:
-                                raise RuntimeError("No RLModule available for inference")
-                            obs_np = _np.asarray(obs, dtype=_np.float32)
-                            obs_tensor = _torch.from_numpy(obs_np).unsqueeze(0)
-                            outputs = module.forward_inference({"obs": obs_tensor})
-                            # Extract action from outputs
-                            if isinstance(outputs, dict):
-                                if "actions" in outputs:
-                                    act_tensor = outputs["actions"]
-                                    act_np = act_tensor.detach().cpu().numpy() if hasattr(act_tensor, "detach") else _np.array(act_tensor)
-                                    action = int(act_np[0]) if act_np.ndim > 0 else int(act_np)
-                                elif "action_dist_inputs" in outputs:
-                                    logits = outputs["action_dist_inputs"]
-                                    logits = logits.detach().cpu().numpy() if hasattr(logits, "detach") else logits
-                                    action = int(_np.argmax(logits, axis=-1).item() if getattr(logits, "ndim", 0) > 1 else _np.argmax(logits))
-                                else:
-                                    first_val = next(iter(outputs.values())) if outputs else None
-                                    if first_val is None:
-                                        raise RuntimeError("RLModule produced no usable outputs")
-                                    first_val = first_val.detach().cpu().numpy() if hasattr(first_val, "detach") else first_val
-                                    action = int(_np.argmax(first_val, axis=-1).item() if getattr(first_val, "ndim", 0) > 1 else _np.argmax(first_val))
+                    # Preferred: RLModule-based inference (new API). Fallback to legacy compute_actions only if needed.
+                    if module is not None:
+                        import numpy as _np
+                        import torch as _torch
+                        obs_np = _np.asarray(obs, dtype=_np.float32)
+                        obs_tensor = _torch.from_numpy(obs_np).unsqueeze(0)
+                        outputs = module.forward_inference({"obs": obs_tensor})
+                        # Extract action from outputs
+                        if isinstance(outputs, dict):
+                            if "actions" in outputs:
+                                act_tensor = outputs["actions"]
+                                act_np = act_tensor.detach().cpu().numpy() if hasattr(act_tensor, "detach") else _np.array(act_tensor)
+                                action = int(act_np[0]) if getattr(act_np, "ndim", 0) > 0 else int(act_np)
+                            elif "action_dist_inputs" in outputs:
+                                logits = outputs["action_dist_inputs"]
+                                logits = logits.detach().cpu().numpy() if hasattr(logits, "detach") else logits
+                                action = int(_np.argmax(logits, axis=-1).item() if getattr(logits, "ndim", 0) > 1 else _np.argmax(logits))
                             else:
-                                out = outputs
-                                out = out.detach().cpu().numpy() if hasattr(out, "detach") else out
-                                action = int(_np.argmax(out, axis=-1).item() if getattr(out, "ndim", 0) > 1 else _np.argmax(out))
+                                first_val = next(iter(outputs.values())) if outputs else None
+                                if first_val is None:
+                                    raise RuntimeError("RLModule produced no usable outputs")
+                                first_val = first_val.detach().cpu().numpy() if hasattr(first_val, "detach") else first_val
+                                action = int(_np.argmax(first_val, axis=-1).item() if getattr(first_val, "ndim", 0) > 1 else _np.argmax(first_val))
+                        else:
+                            out = outputs
+                            out = out.detach().cpu().numpy() if hasattr(out, "detach") else out
+                            action = int(_np.argmax(out, axis=-1).item() if getattr(out, "ndim", 0) > 1 else _np.argmax(out))
+                    else:
+                        # Legacy fallback (may be deprecated in RLlib):
+                        acts = self.trainer.compute_actions([obs], explore=False)
+                        action = acts[0][0] if isinstance(acts, tuple) else acts[0]
 
                     obs, reward, terminated, truncated, step_info = env.step(action)
                     ep_reward += float(reward)
