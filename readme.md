@@ -35,6 +35,9 @@ pip install -r requirements.txt
 # Train a DQN agent with default configuration
 python src/train.py --config configs/dqn_config.yaml
 
+# Train a PPO agent with default configuration
+python src/train.py --config configs/ppo_config.yaml
+
 # Train with custom parameters
 python src/train.py --config configs/dqn_config.yaml --num-workers 4 --num-gpus 1
 ```
@@ -57,7 +60,7 @@ Edit `configs/dqn_config.yaml` to modify:
 - `power_reward.py`: Power consumption-based reward functions
 
 ### Algorithms (`src/algorithms/`)
-- `trainer.py`: RLlib trainer wrapper with DQN configuration
+- `trainer.py`: RLlib trainer wrapper with DQN and PPO configurations
 
 ### Utils (`src/utils/`)
 - `metrics.py`: Metrics collection and logging utilities

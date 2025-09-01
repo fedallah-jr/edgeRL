@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 import numpy as np
 import ray
 from ray.rllib.algorithms.dqn import DQNConfig
+from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.core.rl_module.rl_module import RLModuleSpec
 
@@ -120,6 +121,8 @@ class RLTrainer:
         """Setup the RL algorithm based on configuration."""
         if self.algorithm_name == "DQN":
             self.trainer = self._setup_dqn()
+        elif self.algorithm_name == "PPO":
+            self.trainer = self._setup_ppo()
         else:
             raise ValueError(f"Unsupported algorithm: {self.algorithm_name}")
     
@@ -215,6 +218,112 @@ class RLTrainer:
             
             return cfg.build_algo()
     
+    def _setup_ppo(self):
+        """Setup PPO algorithm.
+        
+        Returns:
+        
+            Configured PPO algorithm instance
+        """
+        # Get PPO-specific configuration
+        ppo_cfg_dict = self.config.get('algorithm', {}).get('hyperparameters', {})
+        
+        # Import env here to avoid registration timing issues
+        from ..envs.edge_env import EdgeEnv
+        
+        # Build RLlib PPO config using the modern API
+        cfg = PPOConfig()
+        
+        # Environment configuration
+        cfg = cfg.environment(
+            env=EdgeEnv,
+            env_config=self.env_config,
+            disable_env_checking=True
+        )
+        
+        # Framework configuration
+        cfg = cfg.framework(framework="torch")
+        
+        # Resources configuration
+        cfg = cfg.resources(
+            num_gpus=self.resource_config.get('num_gpus', 0)
+        )
+        
+        # Learners configuration
+        cfg = cfg.learners(
+            num_learners=0,
+            num_cpus_per_learner=1
+        )
+        
+        # Environment runners configuration
+        cfg = cfg.env_runners(
+            num_env_runners=self.resource_config.get('num_workers', 1),
+            num_envs_per_env_runner=1,
+            rollout_fragment_length=ppo_cfg_dict.get('rollout_fragment_length', 128),
+            batch_mode="truncate_episodes"
+        )
+        
+        # Map YAML key 'lambda' to RLlib's 'lambda_'
+        lam = ppo_cfg_dict.get('lambda_', ppo_cfg_dict.get('lambda', 0.95))
+        
+        # Training configuration
+        try:
+            cfg = cfg.training(
+                lr=float(ppo_cfg_dict.get('lr', 5e-4)),
+                gamma=float(ppo_cfg_dict.get('gamma', 0.99)),
+                clip_param=float(ppo_cfg_dict.get('clip_param', 0.2)),
+                lambda_=float(lam),
+                entropy_coeff=float(ppo_cfg_dict.get('entropy_coeff', 0.0)),
+                vf_loss_coeff=float(ppo_cfg_dict.get('vf_loss_coeff', 0.5)),
+                vf_clip_param=float(ppo_cfg_dict.get('vf_clip_param', 10.0)),
+                train_batch_size=int(ppo_cfg_dict.get('train_batch_size', 2048)),
+                sgd_minibatch_size=int(ppo_cfg_dict.get('sgd_minibatch_size', 256)),
+                num_sgd_iter=int(ppo_cfg_dict.get('num_sgd_iter', 10)),
+                grad_clip=float(ppo_cfg_dict.get('grad_clip', 0.5)),
+            )
+        except Exception:
+            # Some versions may not support all kwargs; fall back to a minimal set
+            cfg = cfg.training(
+                lr=float(ppo_cfg_dict.get('lr', 5e-4)),
+                gamma=float(ppo_cfg_dict.get('gamma', 0.99)),
+                train_batch_size=int(ppo_cfg_dict.get('train_batch_size', 1024)),
+            )
+        
+        # Callbacks configuration
+        cfg = cfg.callbacks(callbacks_class=EdgeSimCallbacks)
+        
+        # Debugging configuration
+        cfg = cfg.debugging(
+            seed=self.training_config.get('seed', 42),
+            log_level="WARN"
+        )
+        
+        # Build the Algorithm instance
+        try:
+            algo = cfg.build_algo()
+            return algo
+        except Exception as e:
+            print(f"Error building PPO algorithm: {e}")
+            print("Falling back to simpler PPO configuration...")
+            
+            # Fallback to simpler configuration if advanced features fail
+            cfg = (
+                PPOConfig()
+                .environment(env=EdgeEnv, env_config=self.env_config, disable_env_checking=True)
+                .framework("torch")
+                .resources(num_gpus=0)
+                .learners(num_learners=0)
+                .env_runners(num_env_runners=1)
+                .training(
+                    lr=5e-4,
+                    gamma=0.99,
+                    train_batch_size=1024
+                )
+                .debugging(seed=42)
+            )
+            
+            return cfg.build_algo()
+        
     def _get_nested(self, d: dict, path: list):
         """Safely get a nested value from a dict using a path list."""
         current = d
