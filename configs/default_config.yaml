@@ -8,9 +8,9 @@ env:
   tick_duration: 1
   tick_unit: "seconds"
   
-  # Enable environment stochasticity (Disabled for deterministic runs)
-  randomize_initial_placement: false  # Deterministic initial placement at reset
-  use_random_scheduler: false         # Use deterministic default scheduler
+  # Enable environment stochasticity (ON by default)
+  randomize_initial_placement: true   # Randomize service initial placement at reset
+  use_random_scheduler: true          # Use EdgeSimPy's RandomScheduler for agent activation order
   
   # State space configuration
   state:

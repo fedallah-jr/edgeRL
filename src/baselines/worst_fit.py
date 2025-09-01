@@ -33,9 +33,12 @@ class WorstFitBaseline:
             # No current service: return any valid index (0 is safe as action space is [0, num_servers-1])
             return 0
 
-        # Compute geometric mean of raw free resources (no clamping)
+        # Compute free capacity with geometric mean of free CPU, MEM, DISK
         def free_score(s):
-            return ((s.cpu - s.cpu_demand) * (s.memory - s.memory_demand) * (s.disk - s.disk_demand)) ** (1 / 3)
+            free_cpu = max(0, s.cpu - s.cpu_demand)
+            free_mem = max(0, s.memory - s.memory_demand)
+            free_disk = max(0, s.disk - s.disk_demand)
+            return (free_cpu * free_mem * free_disk) ** (1 / 3) if free_cpu * free_mem * free_disk > 0 else 0
 
         sorted_servers = sorted(servers, key=lambda s: free_score(s), reverse=True)
 
