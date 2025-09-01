@@ -150,18 +150,6 @@ class RLTrainer:
         
         # Framework configuration
         cfg = cfg.framework(framework="torch")
-
-        # Prefer new RLModule API to avoid deprecation warnings
-        try:
-            model_cfg = dqn_cfg_dict.get('model', {}) if isinstance(dqn_cfg_dict, dict) else {}
-            cfg = cfg.rl_module(
-                rl_module_spec=RLModuleSpec(
-                    model_config_dict=model_cfg,
-                )
-            )
-        except Exception:
-            # If RLlib version does not support this call, continue without it
-            pass
         
         # Resources configuration
         cfg = cfg.resources(
@@ -255,18 +243,6 @@ class RLTrainer:
         
         # Framework configuration
         cfg = cfg.framework(framework="torch")
-
-        # Prefer new RLModule API to avoid deprecation warnings
-        try:
-            model_cfg = ppo_cfg_dict.get('model', {}) if isinstance(ppo_cfg_dict, dict) else {}
-            cfg = cfg.rl_module(
-                rl_module_spec=RLModuleSpec(
-                    model_config_dict=model_cfg,
-                )
-            )
-        except Exception:
-            # If RLlib version does not support this call, continue without it
-            pass
         
         # Resources configuration
         cfg = cfg.resources(
