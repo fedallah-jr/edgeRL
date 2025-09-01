@@ -358,9 +358,6 @@ class EdgeEnv(BaseEdgeEnv):
 
             # Get current state before action
             state_before = self.get_state()
-            # Prepare immediate-return containers
-            reward_immediate = 0.0
-            state_after_immediate = state_before
             
             # Check if we have services to process
             decided_service_id = None
@@ -402,28 +399,6 @@ class EdgeEnv(BaseEdgeEnv):
                 
                 self.current_service_idx += 1
             
-            # Compute immediate post-action state and metrics BEFORE any simulator time advance
-            try:
-                state_after_immediate = self.get_state()
-            except Exception:
-                state_after_immediate = state_before
-            try:
-                immediate_runtime_info = self.get_info()
-                if isinstance(immediate_runtime_info, dict):
-                    # Preserve flags already set in info; add instantaneous metrics
-                    for k, v in immediate_runtime_info.items():
-                        if k not in ('valid_action', 'migration'):
-                            info[k] = v
-                    info['measured_at'] = 'post_action_pre_tick'
-            except Exception:
-                pass
-            try:
-                reward_immediate = self.reward_calculator.calculate(
-                    state_before, action, state_after_immediate, info
-                )
-            except Exception:
-                reward_immediate = 0.0
-            
             # If we've processed all services (one pass), advance simulation time by one tick
             if self.current_service_idx >= len(self.services_to_migrate) or not self.services_to_migrate:
                 # Treat lack of services as a valid no-op decision to avoid invalid-action penalties
@@ -433,16 +408,6 @@ class EdgeEnv(BaseEdgeEnv):
                 try:
                     self.simulator.step()
                     self.current_step += 1
-                    # After advancing, capture optional post-tick metrics without overriding immediate ones
-                    try:
-                        post_tick_info = self.get_info()
-                        if isinstance(post_tick_info, dict):
-                            info['total_power_after_tick'] = post_tick_info.get('total_power', None)
-                            info['mean_latency_after_tick'] = post_tick_info.get('mean_latency', None)
-                            info['total_latency_after_tick'] = post_tick_info.get('total_latency', None)
-                            info['measured_at_post_tick'] = True
-                    except Exception:
-                        pass
                     # Reset for next round
                     self.services_to_migrate = []
                     self.current_service_idx = 0
@@ -450,8 +415,8 @@ class EdgeEnv(BaseEdgeEnv):
                     # Handle step error gracefully
                     self.current_step += 1
             
-            # Use the immediate post-action state for reward consistency
-            state_after = state_after_immediate
+            # Get new state
+            state_after = self.get_state()
             
             # Add decision identifiers to info for evaluation pattern accounting
             if decided_service_id is not None:
@@ -460,8 +425,18 @@ class EdgeEnv(BaseEdgeEnv):
                 # Mark no-migration when action was valid and resulted in no migration (e.g., selecting current server)
                 info['no_migration_action'] = bool(info.get('valid_action', False) and not info.get('migration', False))
             
-            # Reward was computed immediately after the action (post-action, pre-tick)
-            reward = reward_immediate
+            # Add runtime metrics to info before calculating reward (so rewards can use them)
+            try:
+                runtime_info = self.get_info()
+                if isinstance(runtime_info, dict):
+                    info.update(runtime_info)
+            except:
+                pass
+
+            # Calculate reward
+            reward = self.reward_calculator.calculate(
+                state_before, action, state_after, info
+            )
             
             # Episode termination/truncation
             terminated = False
