@@ -11,7 +11,7 @@ algorithm:
   # DQN hyperparameters
   hyperparameters:
     # Learning parameters
-    lr: 0.0001
+    lr: 0.0005
     gamma: 0.99
     
     # Exploration
@@ -23,7 +23,7 @@ algorithm:
     
     # Network architecture
     model:
-      fcnet_hiddens: [256, 256]
+      fcnet_hiddens: [64, 64,64]
       fcnet_activation: "relu"
     
     # DQN specific
