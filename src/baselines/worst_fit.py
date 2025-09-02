@@ -103,6 +103,7 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
         step_idx = 0
         powers = []
         latencies = []
+        tick_powers = []  # one value per simulation tick
 
         # Prepare pattern tracking
         try:
@@ -149,6 +150,13 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
                 except Exception:
                     pass
 
+                # Capture one power value per simulation tick
+                try:
+                    if step_info.get('no_services', False) and 'tick_power' in step_info and step_info['tick_power'] is not None:
+                        tick_powers.append(float(step_info['tick_power']))
+                except Exception:
+                    pass
+
                 # Finalize pattern at the end of a scheduling round
                 try:
                     if int(step_info.get('services_to_migrate', 0)) == 0 and len(current_pattern) > 0:
@@ -186,6 +194,17 @@ def evaluate_worst_fit(env_class, env_config: Dict[str, Any], num_episodes: int 
         with open(summary_csv, mode='a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([ep + 1, ep_return, mean_power, mean_latency, unique_actions])
+
+        # Save per-simulation-tick power series for this episode
+        try:
+            pl_path = os.path.join(eval_root, f"power_list_episode_{ep + 1}.csv")
+            with open(pl_path, mode='w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Power"])  # one row per simulation tick
+                for v in tick_powers:
+                    writer.writerow([v])
+        except Exception as e:
+            print(f"    Warning: failed to write power_list CSV for episode {ep + 1}: {e}")
 
     # Save enhanced summary files using shared utilities
     mean_reward = float(np.mean(episode_returns)) if episode_returns else 0.0

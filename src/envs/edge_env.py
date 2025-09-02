@@ -1,7 +1,6 @@
 """EdgeSimPy environment wrapper for reinforcement learning."""
 
 import numpy as np
-import gymnasium as gym
 from gymnasium import spaces
 from typing import Dict, Any, Tuple, List, Optional
 from edge_sim_py import *
@@ -79,12 +78,6 @@ class EdgeEnv(BaseEdgeEnv):
         self.services_to_migrate = []
         self.last_state = None
         self.migration_scheduled = False
-        
-        # Per-simulation-round power accumulation for diagnostics:
-        # - Accumulate instantaneous total_power only on decision steps where a migration occurs.
-        # - At the end of each simulation round (when no_services=True), expose the round sum in info.
-        self._round_power_sum = 0.0
-        self._round_migration_count = 0
         
     def _init_simulator(self):
         """Initialize EdgeSimPy simulator."""
@@ -323,9 +316,6 @@ class EdgeEnv(BaseEdgeEnv):
             self.services_to_migrate = []
             self.last_state = None
             self.migration_scheduled = False
-            # Reset per-round power accumulation
-            self._round_power_sum = 0.0
-            self._round_migration_count = 0
             
             # Reset reward calculator
             if hasattr(self.reward_calculator, 'reset'):
@@ -365,10 +355,6 @@ class EdgeEnv(BaseEdgeEnv):
                 except:
                     self.services_to_migrate = []
                     self.current_service_idx = 0
-            # Detect start of a new simulation round for accumulation
-            if self.services_to_migrate and self.current_service_idx == 0:
-                self._round_power_sum = 0.0
-                self._round_migration_count = 0
 
             # Get current state before action
             state_before = self.get_state()
@@ -453,15 +439,6 @@ class EdgeEnv(BaseEdgeEnv):
             except:
                 pass
 
-            # Accumulate power on migration decision steps and expose per-round diagnostics at end-of-round
-            try:
-                total_power_val = info.get('total_power', None)
-                if not info.get('no_services', False) and info.get('migration', False) and total_power_val is not None:
-                    self._round_power_sum += float(total_power_val)
-                    self._round_migration_count += 1
-            except Exception:
-                pass
-
             if info.get('no_services', False):
                 try:
                     # Per-simulation-step power snapshot (pre-step) for this tick
@@ -469,24 +446,11 @@ class EdgeEnv(BaseEdgeEnv):
                         info['tick_power'] = float(pre_step_total_power)
                     else:
                         # Fallback to current total_power in info (post-step) if pre-step is unavailable
-                        if total_power_val is not None:
-                            info['tick_power'] = float(total_power_val)
-                    # Optional per-round aggregated diagnostic (sum over migration decision steps)
-                    if self._round_migration_count > 0:
-                        info['power_list_value'] = float(self._round_power_sum)
-                    else:
-                        # Ensure at least one measurement in the series even when there were no migrations
-                        if 'tick_power' in info:
-                            info['power_list_value'] = float(info['tick_power'])
-                        else:
-                            info['power_list_value'] = 0.0
-                    info['migrations_in_round'] = int(self._round_migration_count)
+                        tp = info.get('total_power', None)
+                        if tp is not None:
+                            info['tick_power'] = float(tp)
                 except Exception:
                     pass
-                finally:
-                    # Reset accumulators for the next round
-                    self._round_power_sum = 0.0
-                    self._round_migration_count = 0
 
             # Calculate reward
             reward = self.reward_calculator.calculate(
