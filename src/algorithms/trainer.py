@@ -410,6 +410,9 @@ class RLTrainer:
             ep_reward = 0.0
             powers = []
             latencies = []
+            power_list = []
+            round_sum_fallback = 0.0
+            tick_powers = []
             # Per-episode step log buffer
             infos = []
             try:
@@ -514,6 +517,29 @@ class RLTrainer:
                                 except Exception:
                                     pass
                                 break
+
+                        # Per-simulation-step power capture and round-level aggregated series
+                        try:
+                            # Save one power value per simulation tick, when no_services=True
+                            if step_info.get('no_services', False) and 'tick_power' in step_info and step_info['tick_power'] is not None:
+                                tick_powers.append(float(step_info['tick_power']))
+                            # Optional: also keep the aggregated per-round series for comparability
+                            if 'power_list_value' in step_info and step_info['power_list_value'] is not None:
+                                power_list.append(float(step_info['power_list_value']))
+                            else:
+                                # Fallback: accumulate over migration decision steps, flush at end of round
+                                if step_info.get('migration', False) and ('total_power' in step_info and step_info['total_power'] is not None):
+                                    round_sum_fallback += float(step_info['total_power'])
+                                if step_info.get('no_services', False):
+                                    if round_sum_fallback > 0.0:
+                                        power_list.append(float(round_sum_fallback))
+                                    else:
+                                        # Ensure at least one measurement per round
+                                        if 'tick_power' in step_info and step_info['tick_power'] is not None:
+                                            power_list.append(float(step_info['tick_power']))
+                                    round_sum_fallback = 0.0
+                        except Exception:
+                            pass
                         # Build pattern vector using service_id/pattern_choice when available
                         try:
                             sid = step_info.get('service_id', None)
@@ -555,6 +581,17 @@ class RLTrainer:
                             writer.writerow([it.get(k, "") for k in keys])
                 except Exception as e:
                     print(f"    Warning: failed to write steps CSV for episode {episode + 1}: {e}")
+                
+                # Save per-simulation-step power series for this episode (aligned naming: power_list)
+                try:
+                    pl_path = os.path.join(eval_root, f"power_list_episode_{episode + 1}.csv")
+                    with open(pl_path, mode='w', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["Power"])  # one row per simulation tick
+                        for v in tick_powers:
+                            writer.writerow([v])
+                except Exception as e:
+                    print(f"    Warning: failed to write power_list CSV for episode {episode + 1}: {e}")
             except Exception as e:
                 print(f"  Episode {episode + 1}: Error - {e}")
                 results.append(0.0)
